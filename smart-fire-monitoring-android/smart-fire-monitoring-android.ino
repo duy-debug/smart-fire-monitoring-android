@@ -5,10 +5,10 @@
  * ============================================================
  *  Phần cứng:
  *    - DHT11         → GPIO4  (nhiệt độ / độ ẩm): powered with 3.3V
- *    - MQ-2 AO       → GPIO32 (nồng độ khí — ADC1): + resistor 10kΩ từ 3.3V → chân AO để tạo điện áp tham chiếu, an toàn khi Wi-Fi hoạt động
+ *    - MQ-2 AO       → GPIO32 (nồng độ khí — ADC1)
  *    - MQ-2 DO       → GPIO15 (ngưỡng số)
  *    - Flame #1,3,5 AO → GPIO33,34,35 (ADC1 — an toàn khi Wi-Fi bật)
- *    - Flame #2,4 AO → GPIO36,39 (nếu board không có chân này thì raw = 0 lên Firebase)
+ *    - Flame #2,4 AO → GPIO36,39 (nếu board không có chân này thì raw = 0)
  *    - Flame #1–5 DO → GPIO13,25,14,27,26
  *    - Servo Pan     → GPIO18 (PWM — quay trái/phải)
  *    - Servo Tilt    → GPIO5  (PWM — ngẩng lên/xuống)
@@ -20,6 +20,14 @@
  *    - Adafruit Unified Sensor
  *    - ESP32Servo
  *    - Firebase ESP32 Client (Mobizt)
+ *
+ *  Tối ưu v2.2.0:
+ *    - Thay String động bằng enum + const char* (giảm phân mảnh heap)
+ *    - Batch read Firebase (getJSON thay vì nhiều get riêng lẻ)
+ *    - Ghi Firebase 2s/lần khi bình thường, 500ms khi cháy
+ *    - Baud rate 115200
+ *    - Hardware Watchdog Timer 10s
+ *    - Sensor fusion: nhiệt + khí gas kết hợp kích hoạt cảnh báo
  * ============================================================
  */
 
@@ -28,10 +36,13 @@
 #include <DHT.h>
 #include <ESP32Servo.h>
 #include <Firebase_ESP_Client.h>
+#include <esp_task_wdt.h>
+#include "soc/soc.h"
+#include "soc/rtc_cntl_reg.h"
 
 // Helper để dùng RTDB và các tính năng khác của Firebase-ESP-Client
-#include "addons/TokenHelper.h" // Callback xử lý token
-#include "addons/RTDBHelper.h"  // Helper in dữ liệu RTDB (tuỳ chọn)
+#include "addons/TokenHelper.h"
+#include "addons/RTDBHelper.h"
 
 #include "credentials.h"
 
@@ -41,42 +52,64 @@
 #define FB_ROOT "/fire-alarm-system"
 
 // ─────────────────────────────────────────────────────────────
+//  WATCHDOG TIMER (30 giây — đủ cho SSL handshake Firebase)
+// ─────────────────────────────────────────────────────────────
+#define WDT_TIMEOUT_S 30
+
+// ─────────────────────────────────────────────────────────────
 //  CHÂN GPIO
 // ─────────────────────────────────────────────────────────────
 #define DHT_PIN 4
 #define DHT_TYPE DHT11
 
-#define MQ2_AO_PIN 32 // ADC1 — an toàn khi Wi-Fi bật
+#define MQ2_AO_PIN 32
 #define MQ2_DO_PIN 15
 
-// AO: cường độ hồng ngoại (ADC1), DO: nhị phân (active-LOW)
-// Mắt #2 và #4 dùng chân dự phòng 36/39; nếu board không có header thì code sẽ ghi raw = 0.
 const int FLAME_AO_PINS[5] = {33, 36, 34, 39, 35};
 const int FLAME_DO_PINS[5] = {13, 25, 14, 27, 26};
 const bool FLAME_AO_ENABLED[5] = {true, false, true, false, true};
 
-#define SERVO_PAN_PIN 18 // Trục X — quay trái/phải
-#define SERVO_TILT_PIN 5 // Trục Y — ngẩng/cúi
+// ─────────────────────────────────────────────────────────────
+//  CẤU HÌNH LOGIC CẢM BIẾN LỬA
+//  DO: LOW = có lửa (active-LOW)
+//  AO: giá trị CAO = lửa mạnh (dùng để xác định hướng khi >1 mắt báo)
+// ─────────────────────────────────────────────────────────────
 
-#define RELAY_PIN 19 // Relay bơm: active-HIGH
-#define BUZZER_PIN 2 // Buzzer qua transistor NPN BC547
+#define SERVO_PAN_PIN 18
+#define SERVO_TILT_PIN 5
+
+#define RELAY_PIN 19
+#define BUZZER_PIN 2
 
 // ─────────────────────────────────────────────────────────────
-//  ÁNH XẠ GÓC SERVO
+//  ENUM THAY THẾ STRING ĐỘNG (Tối ưu #1: tránh phân mảnh heap)
 // ─────────────────────────────────────────────────────────────
-// Góc Pan theo từng mắt: #1(trái xa)=0° ... #5(phải xa)=180°
-const int PAN_ANGLES[5] = {0, 45, 90, 135, 180};
+enum MQ2Level { MQ2_SAFE, MQ2_WARNING, MQ2_DANGER };
+const char* MQ2_LEVEL_STR[] = {"safe", "warning", "danger"};
 
-// Tilt nội suy từ ADC:
-//   ADC thấp (lửa gần) → Tilt nhỏ (hạ vòi phun vào gốc lửa)
-//   ADC cao  (lửa xa)  → Tilt lớn (ngẩng vòi, nước bay xa)
-#define TILT_MIN 30
-#define TILT_MAX 90
+enum FlameDir { DIR_LEFT, DIR_CENTER_LEFT, DIR_CENTER, DIR_CENTER_RIGHT, DIR_RIGHT, DIR_NONE };
+const char* FLAME_DIR_STR[] = {"left", "center-left", "center", "center-right", "right", "none"};
+
+enum SystemMode { MODE_AUTO, MODE_MANUAL };
+const char* SYSTEM_MODE_STR[] = {"auto", "manual"};
+
+enum DHTStatus { DHT_OK, DHT_ERROR };
+const char* DHT_STATUS_STR[] = {"ok", "error"};
+
+// ─────────────────────────────────────────────────────────────
+//  ÁNH XẠ GÓC SERVO (theo cơ cấu thực tế)
+//  Trục X (Pan): 0° — 90° — 180°
+//    Flame 1=50°, Flame 2=70°, Flame 3=90°, Flame 4=120°, Flame 5=140°
+//  Trục Y (Tilt): dưới=150° → trên=30°
+//    AO cao (lửa gần) → Tilt lớn (hạ vòi xuống gốc lửa)
+//    AO thấp (lửa xa) → Tilt nhỏ (ngẩng vòi, nước bay xa)
+// ─────────────────────────────────────────────────────────────
+const int PAN_ANGLES[5] = {50, 70, 90, 120, 140};
+
+#define TILT_MIN 30   // Ngẩng cao nhất (lửa xa)
+#define TILT_MAX 150  // Hạ thấp nhất (lửa gần)
 #define ADC_NEAR 0
 #define ADC_FAR 2048
-
-const String DIRECTIONS[5] = {
-    "left", "center-left", "center", "center-right", "right"};
 
 // ─────────────────────────────────────────────────────────────
 //  NGƯỠNG MẶC ĐỊNH (cập nhật động từ Firebase)
@@ -88,11 +121,9 @@ float tempWarning = 60.0f;
 
 // ─────────────────────────────────────────────────────────────
 //  ĐỐI TƯỢNG FIREBASE-ESP-CLIENT
-//  FirebaseAuth  → lưu thông tin đăng nhập (anonymous UID, token)
-//  FirebaseConfig → cấu hình project (API key, database URL)
-//  FirebaseData   → đối tượng truyền nhận dữ liệu RTDB
 // ─────────────────────────────────────────────────────────────
 FirebaseData fbData;
+FirebaseData fbStreamData; // Stream riêng cho node control/
 FirebaseConfig fbConfig;
 FirebaseAuth fbAuth;
 
@@ -108,24 +139,25 @@ Servo servoTilt;
 // ─────────────────────────────────────────────────────────────
 float temperature = 0.0f;
 float humidity = 0.0f;
-String dhtStatus = "ok";
+DHTStatus dhtStatus = DHT_OK;
 
 int mq2Value = 0;
-String mq2Level = "safe";
+MQ2Level mq2Level = MQ2_SAFE;
 
 bool flameDetected[5] = {false};
 int flameRaw[5] = {4095, 4095, 4095, 4095, 4095};
 bool anyFlameDetected = false;
 int flamePriorityIdx = -1;
-String flameDirection = "none";
+FlameDir flameDirection = DIR_NONE;
 
 // ─────────────────────────────────────────────────────────────
 //  DEBOUNCE CẢM BIẾN LỬA
-//  Xác nhận CÓ/KHÔNG lửa sau >= CONFIRM_THRESHOLD lần đọc
-//  liên tiếp, mỗi lần cách CONFIRM_INTERVAL_MS ms
+//  BẬT: 1 lần = phản ứng ngay (nhạy)
+//  TẮT: 3 lần × 100ms = 300ms (nhanh nhưng tránh tắt nhầm)
 // ─────────────────────────────────────────────────────────────
-#define CONFIRM_THRESHOLD 3
-#define CONFIRM_INTERVAL_MS 50
+#define CONFIRM_ON_THRESHOLD 1
+#define CONFIRM_OFF_THRESHOLD 3
+#define CONFIRM_INTERVAL_MS 100
 
 int confirmOnCount = 0;
 int confirmOffCount = 0;
@@ -135,27 +167,53 @@ unsigned long lastConfirmRead = 0;
 //  BIẾN TRẠNG THÁI HỆ THỐNG
 // ─────────────────────────────────────────────────────────────
 bool fireDetected = false;
-String systemMode = "auto"; // "auto" | "manual"
+SystemMode systemMode = MODE_AUTO;
 bool pumpActive = false;
 bool buzzerActive = false;
 int currentPan = 90;
-int currentTilt = 60;
+int currentTilt = 90;
 bool waitingForServo = false;
 unsigned long fireTriggerTime = 0;
-String currentLogKey = ""; // Key log hiện tại để ghi resolved_at
+String currentLogKey = "";
+
+// ─────────────────────────────────────────────────────────────
+//  SENSOR FUSION (Tối ưu #7)
+//  Kết hợp nhiệt độ + khí gas để phát hiện nguy cơ cháy
+// ─────────────────────────────────────────────────────────────
+bool sensorFusionAlert = false;
 
 // ─────────────────────────────────────────────────────────────
 //  BIẾN TRẠNG THÁI KẾT NỐI
 // ─────────────────────────────────────────────────────────────
 bool wifiConnected = false;
-bool fbReady = false; // true khi Firebase đã sign-in thành công
+bool fbReady = false;
 bool ntpSynced = false;
 bool firebaseInitStarted = false;
 bool firebaseDefaultsInitialized = false;
 bool ntpInitStarted = false;
+bool streamStarted = false;
 unsigned long wifiStableSince = 0;
 
-const unsigned long WIFI_STABLE_GRACE_MS = 3000;
+const unsigned long WIFI_STABLE_GRACE_MS = 5000; // Chờ 5s WiFi ổn định trước khi dùng Firebase
+
+// ─────────────────────────────────────────────────────────────
+//  DIRTY FLAG — CHỈ GHI FIREBASE KHI DỮ LIỆU THAY ĐỔI
+//  (Tối ưu #3: giảm traffic Firebase)
+// ─────────────────────────────────────────────────────────────
+bool sensorDataDirty = true;
+
+// Lưu giá trị cũ để so sánh
+float prevTemperature = -999;
+float prevHumidity = -999;
+int prevMq2Value = -1;
+MQ2Level prevMq2Level = MQ2_SAFE;
+bool prevFlameDetected[5] = {false};
+bool prevAnyFlame = false;
+bool prevPumpActive = false;
+bool prevBuzzerActive = false;
+int prevPan = -1;
+int prevTilt = -1;
+bool prevFireDetected = false;
 
 // ─────────────────────────────────────────────────────────────
 //  TIMER NON-BLOCKING
@@ -167,22 +225,26 @@ unsigned long lastFBWrite = 0;
 unsigned long lastFBCmdRead = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastWiFiRetry = 0;
-unsigned long wifiRetryInterval = 1000; // Exponential backoff
+
+// Tối ưu #3: interval ghi Firebase động
+// Bình thường: 2000ms | Khi cháy: 500ms
+#define FB_WRITE_INTERVAL_NORMAL 2000
+#define FB_WRITE_INTERVAL_FIRE   500
 
 // ─────────────────────────────────────────────────────────────
 //  PHIÊN BẢN
 // ─────────────────────────────────────────────────────────────
-#define FIRMWARE_VERSION "2.1.0"
+#define FIRMWARE_VERSION "2.2.0"
+
+// ─────────────────────────────────────────────────────────────
+//  JSON BATCH OBJECT (Tối ưu #1: tránh allocate/free mỗi lần ghi)
+// ─────────────────────────────────────────────────────────────
+FirebaseJson batchJson;
 
 // ════════════════════════════════════════════════════════════
 //  PHẦN 1 — KẾT NỐI MẠNG, FIREBASE AUTH, THỜI GIAN
 // ════════════════════════════════════════════════════════════
 
-/*
- * Bắt đầu kết nối Wi-Fi — non-blocking.
- * Chỉ gọi WiFi.begin() rồi trả về ngay.
- * Trạng thái kết nối kiểm tra trong manageWiFi().
- */
 void startWiFi()
 {
   Serial.printf("[WiFi] Đang kết nối tới \"%s\"...\n", WIFI_SSID);
@@ -190,54 +252,77 @@ void startWiFi()
   WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
 }
 
-/*
- * Quản lý Wi-Fi định kỳ trong loop().
- * Thử kết nối lại theo exponential backoff khi mất mạng:
- * 1s → 2s → 4s → 8s → 16s → 30s (tối đa).
- */
+// ─────────────────────────────────────────────────────────────
+//  QUẢN LÝ WIFI — HOÀN TOÀN NON-BLOCKING
+//  Hệ thống hoạt động 2 chế độ:
+//    1. CÓ WiFi: đọc cảm biến + ghi Firebase + nhận lệnh
+//    2. KHÔNG WiFi: đọc cảm biến + chữa cháy local (auto mode)
+//  WiFi retry mỗi 10s, KHÔNG block loop()
+// ─────────────────────────────────────────────────────────────
+#define WIFI_RETRY_INTERVAL_MS 10000  // Thử kết nối lại mỗi 10s
+bool wifiConnecting = false;          // Đang trong quá trình kết nối
+unsigned long wifiConnectStart = 0;   // Thời điểm bắt đầu kết nối
+
 void manageWiFi()
 {
   bool prev = wifiConnected;
   wifiConnected = (WiFi.status() == WL_CONNECTED);
 
+  // ── ĐÃ KẾT NỐI ──────────────────────────────────────────
   if (wifiConnected)
   {
-    wifiRetryInterval = 1000; // Reset backoff
+    wifiConnecting = false;
     if (!prev)
     {
       wifiStableSince = millis();
-      Serial.printf("[WiFi] Đã kết nối. IP: %s\n",
+      Serial.printf("[WiFi] ✓ Đã kết nối. IP: %s\n",
                     WiFi.localIP().toString().c_str());
+      // Reset stream khi WiFi reconnect — stream cũ đã hỏng
+      if (streamStarted)
+      {
+        streamStarted = false;
+        Serial.println("[Stream] Reset — sẽ khởi tạo lại.");
+      }
     }
     return;
   }
 
+  // ── MẤT KẾT NỐI ─────────────────────────────────────────
   wifiStableSince = 0;
 
-  if (millis() - lastWiFiRetry >= wifiRetryInterval)
+  // Reset trạng thái Firebase khi mất WiFi
+  if (prev && !wifiConnected)
+  {
+    fbReady = false;
+    Serial.println("[WiFi] ✗ Mất kết nối — chuyển sang chế độ LOCAL.");
+  }
+
+  // Đang chờ kết nối — in tiến trình
+  if (wifiConnecting)
+  {
+    unsigned long elapsed = (millis() - wifiConnectStart) / 1000;
+    // In mỗi 3s để biết hệ thống đang làm gì
+    if (elapsed > 0 && elapsed % 3 == 0 &&
+        millis() - wifiConnectStart > (elapsed * 1000 - 100))
+    {
+      Serial.printf("[WiFi] Đang chờ kết nối... %lus\n", elapsed);
+    }
+    return; // Không block, trả về loop() ngay
+  }
+
+  // Đã đủ thời gian retry — thử kết nối lại
+  if (millis() - lastWiFiRetry >= WIFI_RETRY_INTERVAL_MS)
   {
     lastWiFiRetry = millis();
-    wifiRetryInterval = min(wifiRetryInterval * 2UL, 30000UL);
-    Serial.printf("[WiFi] Thử kết nối lại... (backoff %lu ms)\n",
-                  wifiRetryInterval);
+    wifiConnecting = true;
+    wifiConnectStart = millis();
+    Serial.printf("[WiFi] Thử kết nối lại (retry mỗi %ds)...\n",
+                  WIFI_RETRY_INTERVAL_MS / 1000);
     WiFi.disconnect();
     WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
   }
 }
 
-/*
- * Khởi tạo Firebase với Anonymous Authentication.
- *
- * Luồng hoạt động của Firebase-ESP-Client:
- *   1. Cấu hình API key và database URL
- *   2. Không set fbAuth.user → thư viện tự nhận đây là anonymous sign-in
- *   3. Firebase.begin() khởi động; thư viện tự gọi REST API
- *      POST /v1/accounts:signUp?key={apiKey} → nhận idToken + refreshToken
- *   4. Token tự động làm mới trước khi hết hạn (mỗi ~1 giờ)
- *   5. tokenStatusCallback() được gọi khi token ready/error
- *
- * Chỉ gọi một lần sau khi Wi-Fi đã kết nối.
- */
 void initFirebase()
 {
   if (firebaseInitStarted)
@@ -245,24 +330,13 @@ void initFirebase()
 
   firebaseInitStarted = true;
 
-  // API Key (Web API Key) — KHÔNG phải Database Secret cũ
   fbConfig.api_key = FIREBASE_API_KEY;
-
-  // URL Realtime Database
   fbConfig.database_url = FIREBASE_DATABASE_URL;
-
-  // Callback theo dõi trạng thái token (từ addons/TokenHelper.h)
-  // In ra Serial khi token đang tạo, ready, hoặc lỗi
   fbConfig.token_status_callback = tokenStatusCallback;
-
-  // Thời gian thử lại khi tạo token thất bại (ms)
   fbConfig.max_token_generation_retry = 5;
 
-  /*
-   * Anonymous sign-in:
-   *   Thư viện này cần signUp với chuỗi rỗng để tạo user ẩn danh.
-   *   Sau đó mới gọi Firebase.begin() với auth/config đã được tạo.
-   */
+  esp_task_wdt_reset(); // Feed WDT trước SSL handshake
+
   if (!Firebase.signUp(&fbConfig, &fbAuth, "", ""))
   {
     Serial.printf("[Firebase] signUp lỗi: %s\n",
@@ -273,21 +347,23 @@ void initFirebase()
     Serial.println("[Firebase] Anonymous user đã được tạo.");
   }
 
+  esp_task_wdt_reset(); // Feed WDT sau signUp
+
   Firebase.begin(&fbConfig, &fbAuth);
   Firebase.reconnectWiFi(true);
 
-  // Buffer size để tránh overflow khi đọc/ghi JSON lớn
+  // Set timeout cho các request Firebase (tránh block vô hạn khi mất mạng)
   fbData.setBSSLBufferSize(4096, 1024);
   fbData.setResponseSize(4096);
 
+  // Timeout 15s cho mỗi request — nếu quá sẽ trả lỗi thay vì block
+  fbConfig.timeout.serverResponse = 15 * 1000;
+  fbConfig.timeout.socketConnection = 10 * 1000;
+  fbConfig.timeout.sslHandshake = 15 * 1000;
+
   Serial.println("[Firebase] Đã bắt đầu khởi tạo (anonymous sign-in)...");
-  Serial.println("[Firebase] Chờ token ready — xem log bên dưới.");
 }
 
-/*
- * Tạo sẵn các node debug trên Firebase một lần khi token đã sẵn sàng.
- * Mục tiêu là để kiểm tra realtime database trước khi app Android được nối vào.
- */
 void initFirebaseDefaults()
 {
   if (firebaseDefaultsInitialized)
@@ -302,6 +378,8 @@ void initFirebaseDefaults()
   json.set("control/servo/axis_x", 90);
   json.set("control/servo/axis_y", 90);
 
+  esp_task_wdt_reset();
+
   if (Firebase.RTDB.updateNode(&fbData, FB_ROOT, &json))
   {
     firebaseDefaultsInitialized = true;
@@ -315,14 +393,87 @@ void initFirebaseDefaults()
 }
 
 /*
- * Kiểm tra Firebase đã sẵn sàng chưa (token đã được cấp).
- * Firebase.ready() trả về true khi:
- *   - Wi-Fi đã kết nối
- *   - Anonymous sign-in thành công
- *   - idToken hợp lệ (chưa hết hạn hoặc đã làm mới)
- *
- * Gọi trong loop() thay vì kiểm tra fbReady tĩnh.
+ * Tối ưu #2: Stream listener cho node control/
+ * Firebase Stream = WebSocket push, ESP32 nhận lệnh ngay khi App ghi
+ * Không cần polling 500ms → giảm latency + giảm request
  */
+void streamCallback(FirebaseStream data)
+{
+  Serial.printf("[Stream] Path: %s | Type: %s\n",
+                data.dataPath().c_str(), data.dataType().c_str());
+
+  // Chỉ xử lý khi mode = manual VÀ không đang cháy
+  if (systemMode != MODE_MANUAL || fireDetected)
+    return;
+
+  String path = data.dataPath();
+
+  if (data.dataTypeEnum() == fb_esp_rtdb_data_type_json)
+  {
+    // Nhận toàn bộ node control/ (lần đầu stream kết nối)
+    FirebaseJson &json = data.jsonObject();
+    FirebaseJsonData jsonData;
+
+    if (json.get(jsonData, "pump_on") && jsonData.type == "boolean")
+      setPump(jsonData.boolValue);
+
+    if (json.get(jsonData, "buzzer_on") && jsonData.type == "boolean")
+      setBuzzer(jsonData.boolValue);
+
+    int panCmd = currentPan, tiltCmd = currentTilt;
+    if (json.get(jsonData, "servo/axis_x") && jsonData.type == "int")
+      panCmd = jsonData.intValue;
+    if (json.get(jsonData, "servo/axis_y") && jsonData.type == "int")
+      tiltCmd = jsonData.intValue;
+    updateServosManual(panCmd, tiltCmd);
+  }
+  else
+  {
+    // Nhận thay đổi từng field riêng lẻ
+    if (path == "/pump_on")
+      setPump(data.boolData());
+    else if (path == "/buzzer_on")
+      setBuzzer(data.boolData());
+    else if (path == "/servo/axis_x")
+      updateServosManual(data.intData(), currentTilt);
+    else if (path == "/servo/axis_y")
+      updateServosManual(currentPan, data.intData());
+  }
+}
+
+void streamTimeoutCallback(bool timeout)
+{
+  if (timeout)
+    Serial.println("[Stream] Timeout — tự động kết nối lại.");
+}
+
+void startStream()
+{
+  if (streamStarted)
+    return;
+  if (!isFirebaseReady())
+    return;
+
+  // Dừng stream cũ nếu có (giải phóng SSL session)
+  Firebase.RTDB.endStream(&fbStreamData);
+  fbStreamData.clear();
+
+  fbStreamData.setBSSLBufferSize(2048, 512);
+
+  esp_task_wdt_reset();
+
+  if (Firebase.RTDB.beginStream(&fbStreamData, FB_ROOT "/control"))
+  {
+    Firebase.RTDB.setStreamCallback(&fbStreamData, streamCallback, streamTimeoutCallback);
+    streamStarted = true;
+    Serial.println("[Stream] Đã bắt đầu lắng nghe node control/.");
+  }
+  else
+  {
+    Serial.printf("[Stream] Lỗi: %s\n", fbStreamData.errorReason().c_str());
+  }
+}
+
 bool isFirebaseReady()
 {
   return wifiConnected && wifiStableSince > 0 &&
@@ -330,20 +481,12 @@ bool isFirebaseReady()
          Firebase.ready();
 }
 
-/*
- * Đồng bộ thời gian NTP — gọi sau khi có Wi-Fi.
- * Múi giờ Việt Nam: UTC+7 = 25200 giây offset, không có DST.
- */
 void initNTP()
 {
   configTime(7 * 3600, 0, "pool.ntp.org", "time.nist.gov");
   Serial.println("[NTP] Đang đồng bộ thời gian...");
 }
 
-/*
- * Kiểm tra NTP đã đồng bộ chưa.
- * Điều kiện: năm >= 2024 (tránh nhầm với epoch mặc định 1970).
- */
 bool checkNTPSynced()
 {
   if (ntpSynced)
@@ -358,7 +501,6 @@ bool checkNTPSynced()
   return true;
 }
 
-/* Lấy Unix timestamp UTC. Trả về 0 nếu NTP chưa sẵn sàng. */
 time_t getTimestamp()
 {
   if (!ntpSynced)
@@ -368,7 +510,6 @@ time_t getTimestamp()
   return now;
 }
 
-/* Chuỗi thời gian "yyyy-MM-dd HH:mm:ss" để ghi vào logs/. */
 String getTimeReadable()
 {
   if (!ntpSynced)
@@ -386,20 +527,18 @@ String getTimeReadable()
 
 void setupServos()
 {
-  // Dải xung chuẩn MG90S: 500µs = 0°, 2400µs = 180°
   servoPan.attach(SERVO_PAN_PIN, 500, 2400);
   servoTilt.attach(SERVO_TILT_PIN, 500, 2400);
   servoPan.write(90);
-  servoTilt.write(60);
+  servoTilt.write(90);
   currentPan = 90;
-  currentTilt = 60;
-  Serial.println("[Servo] Khởi động về trung tâm (Pan=90°, Tilt=60°).");
+  currentTilt = 90;
+  Serial.println("[Servo] Khởi động về trung tâm (Pan=90°, Tilt=90°).");
 }
 
 void setupRelay()
 {
   pinMode(RELAY_PIN, OUTPUT);
-  // Fail-safe: LOW = relay TẮT = bơm TẮT khi khởi động
   digitalWrite(RELAY_PIN, LOW);
   Serial.println("[Relay] Khởi động — bơm TẮT.");
 }
@@ -407,7 +546,6 @@ void setupRelay()
 void setupBuzzer()
 {
   pinMode(BUZZER_PIN, OUTPUT);
-  // LOW = transistor BC547 tắt = còi TẮT (tránh kêu khi reset)
   digitalWrite(BUZZER_PIN, LOW);
   Serial.println("[Buzzer] Khởi động — còi TẮT.");
 }
@@ -416,9 +554,8 @@ void setupFlamePins()
 {
   for (int i = 0; i < 5; i++)
   {
-    // INPUT_PULLUP: giữ mức HIGH ổn định khi không có lửa
-    // Tránh đọc nhiễu khi dây tín hiệu DO hở
-    pinMode(FLAME_DO_PINS[i], INPUT_PULLUP);
+    // Active-HIGH: mặc định LOW = không lửa
+    pinMode(FLAME_DO_PINS[i], INPUT_PULLDOWN);
   }
 }
 
@@ -426,7 +563,6 @@ void setupFlamePins()
 //  PHẦN 3 — ĐỌC CẢM BIẾN
 // ════════════════════════════════════════════════════════════
 
-/* Đọc DHT11 mỗi 2000ms. NaN → ghi "error", giữ giá trị cũ. */
 void readDHT11()
 {
   if (millis() - lastDHTRead < 2000)
@@ -438,77 +574,117 @@ void readDHT11()
 
   if (isnan(t) || isnan(h))
   {
-    dhtStatus = "error";
+    dhtStatus = DHT_ERROR;
     Serial.println("[DHT11] Lỗi đọc — giữ nguyên giá trị cũ.");
     return;
   }
   temperature = t;
   humidity = h;
-  dhtStatus = "ok";
+  dhtStatus = DHT_OK;
   Serial.printf("[DHT11] %.1f°C | %.1f%%\n", t, h);
 }
 
-/* Đọc MQ-2 mỗi 500ms. Phân mức theo ngưỡng từ Firebase. */
 void readMQ2()
 {
   if (millis() - lastMQ2Read < 500)
     return;
   lastMQ2Read = millis();
 
-  mq2Value = analogRead(MQ2_AO_PIN); // 0–4095 (12-bit ADC1)
+  mq2Value = analogRead(MQ2_AO_PIN);
 
-  String prev = mq2Level;
+  MQ2Level prev = mq2Level;
   if (mq2Value < mq2Safe)
-    mq2Level = "safe";
+    mq2Level = MQ2_SAFE;
   else if (mq2Value < mq2Warning)
-    mq2Level = "warning";
+    mq2Level = MQ2_WARNING;
   else
-    mq2Level = "danger";
+    mq2Level = MQ2_DANGER;
 
   if (mq2Level != prev)
   {
-    Serial.printf("[MQ-2] %d → %s\n", mq2Value, mq2Level.c_str());
+    Serial.printf("[MQ-2] %d → %s\n", mq2Value, MQ2_LEVEL_STR[mq2Level]);
   }
 }
 
-/*
- * Đọc cụm 5 cảm biến lửa mỗi 100ms với debounce 2 chiều.
- *
- * Debounce CÓ lửa:
- *   Raw báo lửa → confirmOnCount tăng mỗi CONFIRM_INTERVAL_MS
- *   confirmOnCount >= CONFIRM_THRESHOLD → xác nhận anyFlameDetected = true
- *
- * Debounce TẮT lửa:
- *   Raw không lửa → confirmOffCount tăng
- *   confirmOffCount >= CONFIRM_THRESHOLD → xác nhận anyFlameDetected = false
- *
- * Hướng ưu tiên: mắt có ADC thấp nhất trong số mắt đang báo lửa
- * (ADC thấp = IR mạnh = lửa gần về phía đó).
- */
 void readFlameSensors()
 {
   if (millis() - lastFlameRead < 100)
     return;
   lastFlameRead = millis();
 
+  // Bỏ qua 5 giây đầu sau boot — cảm biến cần ổn định
+  if (millis() < 5000)
+    return;
+
   bool rawAny = false;
-  int minRaw = 4095;
+  int minRaw = 0;    // Tìm AO cao nhất (lửa mạnh nhất)
   int minIdx = -1;
 
   for (int i = 0; i < 5; i++)
   {
-    flameDetected[i] = (digitalRead(FLAME_DO_PINS[i]) == LOW); // active-LOW
-    flameRaw[i] = FLAME_AO_ENABLED[i] ? analogRead(FLAME_AO_PINS[i]) : 0;
+    // Đọc DO: module này HIGH = có lửa, LOW = không lửa (active-HIGH)
+    bool doState = digitalRead(FLAME_DO_PINS[i]);
+    flameDetected[i] = (doState == HIGH);
 
+    flameRaw[i] = FLAME_AO_ENABLED[i] ? analogRead(FLAME_AO_PINS[i]) : 0;
+  }
+
+  // Đếm số mắt DO báo lửa
+  int fireCount = 0;
+  int singleIdx = -1;
+  for (int i = 0; i < 5; i++)
+  {
     if (flameDetected[i])
     {
-      rawAny = true;
-      if (flameRaw[i] < minRaw)
+      fireCount++;
+      singleIdx = i;
+    }
+  }
+
+  // Xác định hướng lửa:
+  //   1 mắt → dùng DO trực tiếp
+  //   >1 mắt → xét AO (chỉ mắt có DO=0) để chọn mắt có tín hiệu mạnh nhất
+  if (fireCount == 1)
+  {
+    rawAny = true;
+    minIdx = singleIdx;
+    minRaw = flameRaw[singleIdx];
+  }
+  else if (fireCount > 1)
+  {
+    rawAny = true;
+    // Tìm mắt có AO cao nhất trong số mắt DO=0 VÀ AO enabled
+    for (int i = 0; i < 5; i++)
+    {
+      if (flameDetected[i] && FLAME_AO_ENABLED[i])
       {
-        minRaw = flameRaw[i];
-        minIdx = i;
+        if (flameRaw[i] > minRaw)
+        {
+          minRaw = flameRaw[i];
+          minIdx = i;
+        }
       }
     }
+    // Nếu không có mắt AO nào enabled trong số DO=0, lấy mắt DO đầu tiên
+    if (minIdx < 0)
+    {
+      for (int i = 0; i < 5; i++)
+      {
+        if (flameDetected[i]) { minIdx = i; break; }
+      }
+    }
+  }
+
+  // Debug: in trạng thái 5 mắt mỗi 2 giây
+  static unsigned long lastFlameDebug = 0;
+  if (millis() - lastFlameDebug >= 2000)
+  {
+    lastFlameDebug = millis();
+    Serial.printf("[Flame] DO: %d%d%d%d%d | AO: %d %d %d %d %d\n",
+                  flameDetected[0], flameDetected[1], flameDetected[2],
+                  flameDetected[3], flameDetected[4],
+                  flameRaw[0], flameRaw[1], flameRaw[2],
+                  flameRaw[3], flameRaw[4]);
   }
 
   unsigned long now = millis();
@@ -520,39 +696,62 @@ void readFlameSensors()
     {
       confirmOnCount++;
       lastConfirmRead = now;
-      if (confirmOnCount > CONFIRM_THRESHOLD * 2)
-        confirmOnCount = CONFIRM_THRESHOLD;
+      if (confirmOnCount > CONFIRM_ON_THRESHOLD * 2)
+        confirmOnCount = CONFIRM_ON_THRESHOLD;
     }
   }
   else
   {
     confirmOnCount = 0;
-    confirmOffCount++;
-    if (confirmOffCount > CONFIRM_THRESHOLD * 2)
-      confirmOffCount = CONFIRM_THRESHOLD;
+    if (now - lastConfirmRead >= CONFIRM_INTERVAL_MS)
+    {
+      confirmOffCount++;
+      lastConfirmRead = now;
+      if (confirmOffCount > CONFIRM_OFF_THRESHOLD * 2)
+        confirmOffCount = CONFIRM_OFF_THRESHOLD;
+    }
   }
 
-  // Chuyển trạng thái sau khi đủ ngưỡng xác nhận
-  if (confirmOnCount >= CONFIRM_THRESHOLD && !anyFlameDetected)
+  if (confirmOnCount >= CONFIRM_ON_THRESHOLD && !anyFlameDetected)
   {
     anyFlameDetected = true;
     flamePriorityIdx = minIdx;
-    flameDirection = (minIdx >= 0) ? DIRECTIONS[minIdx] : "none";
+    flameDirection = (minIdx >= 0) ? (FlameDir)minIdx : DIR_NONE;
     Serial.printf("[Flame] ✓ CÓ lửa! Hướng: %s (mắt #%d, ADC=%d)\n",
-                  flameDirection.c_str(), minIdx + 1, minRaw);
+                  FLAME_DIR_STR[flameDirection], minIdx + 1, minRaw);
   }
-  else if (confirmOffCount >= CONFIRM_THRESHOLD && anyFlameDetected)
+  else if (confirmOffCount >= CONFIRM_OFF_THRESHOLD && anyFlameDetected)
   {
     anyFlameDetected = false;
     flamePriorityIdx = -1;
-    flameDirection = "none";
+    flameDirection = DIR_NONE;
     Serial.println("[Flame] ✓ Lửa đã TẮT.");
   }
   else if (anyFlameDetected && minIdx >= 0)
   {
-    // Cập nhật hướng liên tục nếu lửa di chuyển
     flamePriorityIdx = minIdx;
-    flameDirection = DIRECTIONS[minIdx];
+    flameDirection = (FlameDir)minIdx;
+  }
+}
+
+/*
+ * Tối ưu #7: Sensor Fusion
+ * Kết hợp nhiệt độ + khí gas để phát hiện nguy cơ cháy
+ * ngay cả khi cảm biến lửa chưa kích hoạt.
+ * Điều kiện: nhiệt độ >= tempWarning VÀ MQ2 >= mq2Warning
+ */
+void checkSensorFusion()
+{
+  bool prevFusion = sensorFusionAlert;
+  sensorFusionAlert = (temperature >= tempWarning && mq2Level == MQ2_DANGER);
+
+  if (sensorFusionAlert && !prevFusion)
+  {
+    Serial.println("[Fusion] CẢNH BÁO: Nhiệt độ CAO + Khí gas NGUY HIỂM!");
+  }
+  else if (!sensorFusionAlert && prevFusion)
+  {
+    Serial.println("[Fusion] Mức nguy hiểm đã giảm.");
   }
 }
 
@@ -560,33 +759,111 @@ void readFlameSensors()
 //  PHẦN 4 — ĐIỀU KHIỂN CHẤP HÀNH
 // ════════════════════════════════════════════════════════════
 
-/* Nội suy góc Tilt từ ADC: ADC thấp → Tilt nhỏ (lửa gần). */
 int calcTiltAngle(int adcValue)
 {
-  adcValue = constrain(adcValue, ADC_NEAR, ADC_FAR);
-  return map(adcValue, ADC_NEAR, ADC_FAR, TILT_MIN, TILT_MAX);
+  // Không dùng AO cho trục Y nữa — trục Y sẽ quét nâng hạ tự động
+  // Hàm này giữ lại cho tương thích nhưng không được gọi trong auto mode
+  adcValue = constrain(adcValue, 0, 4095);
+  return map(adcValue, 0, 4095, TILT_MIN, TILT_MAX);
 }
 
-/* Servo chế độ AUTO — tra bảng Pan, nội suy Tilt. */
+// ─────────────────────────────────────────────────────────────
+//  TRỤC Y QUÉT NÂNG HẠ TỰ ĐỘNG (50° ↔ 150°)
+//  Hạ 3s → dừng 1s → nâng 3s → dừng 1s → lặp lại
+//  Dùng tính toán theo thời gian (không phụ thuộc tốc độ loop)
+// ─────────────────────────────────────────────────────────────
+#define TILT_SWEEP_MIN 100
+#define TILT_SWEEP_MAX 150
+#define TILT_MOVE_DURATION 3000  // 3s để di chuyển hết hành trình
+#define TILT_PAUSE_MS 1000      // Dừng 1s ở đỉnh và đáy
+
+enum TiltState { TILT_GOING_DOWN, TILT_PAUSE_BOTTOM, TILT_GOING_UP, TILT_PAUSE_TOP };
+TiltState tiltState = TILT_GOING_DOWN;
+unsigned long tiltMoveStart = 0;
+
+void sweepTilt()
+{
+  unsigned long now = millis();
+  unsigned long elapsed = now - tiltMoveStart;
+
+  switch (tiltState)
+  {
+    case TILT_GOING_DOWN: // Hạ: 50 → 150 trong 3s
+    {
+      if (elapsed >= TILT_MOVE_DURATION)
+      {
+        currentTilt = TILT_SWEEP_MAX;
+        tiltState = TILT_PAUSE_BOTTOM;
+        tiltMoveStart = now;
+      }
+      else
+      {
+        currentTilt = TILT_SWEEP_MIN + (int)((long)(TILT_SWEEP_MAX - TILT_SWEEP_MIN) * elapsed / TILT_MOVE_DURATION);
+      }
+      servoTilt.write(currentTilt);
+      break;
+    }
+
+    case TILT_PAUSE_BOTTOM: // Dừng 1s ở dưới (150°)
+      if (elapsed >= TILT_PAUSE_MS)
+      {
+        tiltState = TILT_GOING_UP;
+        tiltMoveStart = now;
+      }
+      break;
+
+    case TILT_GOING_UP: // Nâng: 150 → 50 trong 3s
+    {
+      if (elapsed >= TILT_MOVE_DURATION)
+      {
+        currentTilt = TILT_SWEEP_MIN;
+        tiltState = TILT_PAUSE_TOP;
+        tiltMoveStart = now;
+      }
+      else
+      {
+        currentTilt = TILT_SWEEP_MAX - (int)((long)(TILT_SWEEP_MAX - TILT_SWEEP_MIN) * elapsed / TILT_MOVE_DURATION);
+      }
+      servoTilt.write(currentTilt);
+      break;
+    }
+
+    case TILT_PAUSE_TOP: // Dừng 1s ở trên (50°)
+      if (elapsed >= TILT_PAUSE_MS)
+      {
+        tiltState = TILT_GOING_DOWN;
+        tiltMoveStart = now;
+      }
+      break;
+  }
+}
+
+void resetTiltSweep()
+{
+  tiltState = TILT_GOING_DOWN;
+  tiltMoveStart = millis();
+  currentTilt = 90;
+  servoTilt.write(currentTilt);
+}
+
 void updateServosAuto(int priorityIdx)
 {
   if (priorityIdx < 0 || priorityIdx > 4)
     return;
 
   int newPan = PAN_ANGLES[priorityIdx];
-  int newTilt = calcTiltAngle(flameRaw[priorityIdx]);
 
-  if (newPan == currentPan && newTilt == currentTilt)
-    return;
+  if (newPan != currentPan)
+  {
+    currentPan = newPan;
+    servoPan.write(currentPan);
+    Serial.printf("[Servo AUTO] Pan=%d° (mắt #%d)\n", currentPan, priorityIdx + 1);
+  }
 
-  currentPan = newPan;
-  currentTilt = newTilt;
-  servoPan.write(currentPan);
-  servoTilt.write(currentTilt);
-  Serial.printf("[Servo AUTO] Pan=%d° | Tilt=%d°\n", currentPan, currentTilt);
+  // Trục Y: quét nâng hạ tự động 50°↔150°
+  sweepTilt();
 }
 
-/* Servo chế độ MANUAL — giới hạn 0°–180° bảo vệ servo. */
 void updateServosManual(int pan, int tilt)
 {
   currentPan = constrain(pan, 0, 180);
@@ -596,11 +873,6 @@ void updateServosManual(int pan, int tilt)
   Serial.printf("[Servo MANUAL] Pan=%d° | Tilt=%d°\n", currentPan, currentTilt);
 }
 
-/*
- * Bật/tắt bơm qua relay.
- *   true  → GPIO19=HIGH → relay BẬT → bơm BẬT
- *   false → GPIO19=LOW  → relay TẮT → bơm TẮT (fail-safe)
- */
 void setPump(bool state)
 {
   if (pumpActive == state)
@@ -610,11 +882,6 @@ void setPump(bool state)
   Serial.printf("[Bơm] %s\n", state ? "BẬT" : "TẮT");
 }
 
-/*
- * Bật/tắt còi qua transistor BC547.
- *   true  → GPIO2=HIGH → transistor dẫn → còi BẬT
- *   false → GPIO2=LOW  → transistor tắt → còi TẮT
- */
 void setBuzzer(bool state)
 {
   if (buzzerActive == state)
@@ -629,74 +896,123 @@ void setBuzzer(bool state)
 // ════════════════════════════════════════════════════════════
 
 /*
- * Ghi toàn bộ dữ liệu sensor + trạng thái bằng MỘT lần
- * Firebase.updateNode() (JSON batch update).
- *
- * API Firebase-ESP-Client:
- *   Firebase.RTDB.updateNode(&fbData, path, &json)
- *   → Thực hiện PATCH request, chỉ ghi đè các key được chỉ định,
- *     không xoá các key khác trong cùng node.
+ * Kiểm tra dữ liệu có thay đổi không (dirty flag)
+ * Tối ưu #3: chỉ ghi Firebase khi có thay đổi thực sự
+ */
+void checkDirtyFlag()
+{
+  if (temperature != prevTemperature || humidity != prevHumidity)
+    sensorDataDirty = true;
+  if (mq2Value != prevMq2Value || mq2Level != prevMq2Level)
+    sensorDataDirty = true;
+  if (anyFlameDetected != prevAnyFlame)
+    sensorDataDirty = true;
+  if (pumpActive != prevPumpActive || buzzerActive != prevBuzzerActive)
+    sensorDataDirty = true;
+  if (currentPan != prevPan || currentTilt != prevTilt)
+    sensorDataDirty = true;
+  if (fireDetected != prevFireDetected)
+    sensorDataDirty = true;
+
+  for (int i = 0; i < 5; i++)
+  {
+    if (flameDetected[i] != prevFlameDetected[i])
+    {
+      sensorDataDirty = true;
+      break;
+    }
+  }
+}
+
+void updatePrevValues()
+{
+  prevTemperature = temperature;
+  prevHumidity = humidity;
+  prevMq2Value = mq2Value;
+  prevMq2Level = mq2Level;
+  prevAnyFlame = anyFlameDetected;
+  prevPumpActive = pumpActive;
+  prevBuzzerActive = buzzerActive;
+  prevPan = currentPan;
+  prevTilt = currentTilt;
+  prevFireDetected = fireDetected;
+  for (int i = 0; i < 5; i++)
+    prevFlameDetected[i] = flameDetected[i];
+}
+
+/*
+ * Ghi batch Firebase với interval động:
+ *   - Bình thường: 2000ms (giảm 75% traffic so với 500ms cũ)
+ *   - Khi cháy: 500ms (giữ realtime khi khẩn cấp)
+ *   - Chỉ ghi khi dữ liệu thay đổi (dirty flag)
  */
 void writeFirebaseData()
 {
-  if (millis() - lastFBWrite < 500)
+  unsigned long interval = fireDetected ? FB_WRITE_INTERVAL_FIRE : FB_WRITE_INTERVAL_NORMAL;
+
+  if (millis() - lastFBWrite < interval)
     return;
   lastFBWrite = millis();
   if (!isFirebaseReady())
     return;
 
-  FirebaseJson json;
+  // Kiểm tra dirty flag
+  checkDirtyFlag();
+  if (!sensorDataDirty)
+    return;
+
+  batchJson.clear();
 
   // Sensors: DHT11
-  json.set("sensors/dht11/temperature", temperature);
-  json.set("sensors/dht11/humidity", humidity);
-  json.set("sensors/dht11/status", dhtStatus);
+  batchJson.set("sensors/dht11/temperature", temperature);
+  batchJson.set("sensors/dht11/humidity", humidity);
+  batchJson.set("sensors/dht11/status", DHT_STATUS_STR[dhtStatus]);
 
   // Sensors: MQ-2
-  json.set("sensors/mq2/value", mq2Value);
-  json.set("sensors/mq2/level", mq2Level);
-  json.set("sensors/mq2/status", "ok");
+  batchJson.set("sensors/mq2/value", mq2Value);
+  batchJson.set("sensors/mq2/level", MQ2_LEVEL_STR[mq2Level]);
+  batchJson.set("sensors/mq2/status", "ok");
 
   // Sensors: 5 mắt cảm biến lửa
   for (int i = 0; i < 5; i++)
   {
-    json.set("sensors/flame/eye_" + String(i + 1),
-             flameDetected[i] ? 1 : 0);
-    json.set("sensors/flame/eye_" + String(i + 1) + "_raw",
-             flameRaw[i]);
+    batchJson.set("sensors/flame/eye_" + String(i + 1),
+                  flameDetected[i] ? 1 : 0);
+    batchJson.set("sensors/flame/eye_" + String(i + 1) + "_raw",
+                  flameRaw[i]);
   }
-  json.set("sensors/flame/any_detected", anyFlameDetected);
-  json.set("sensors/flame/direction", flameDirection);
-  json.set("sensors/flame/status", "ok");
+  batchJson.set("sensors/flame/any_detected", anyFlameDetected);
+  batchJson.set("sensors/flame/direction", FLAME_DIR_STR[flameDirection]);
+  batchJson.set("sensors/flame/status", "ok");
 
   // Actuators
-  json.set("actuators/servo/axis_x", currentPan);
-  json.set("actuators/servo/axis_y", currentTilt);
-  json.set("actuators/pump", pumpActive);
-  json.set("actuators/buzzer", buzzerActive);
-  json.set("actuators/auto_pump_active", pumpActive && fireDetected);
+  batchJson.set("actuators/servo/axis_x", currentPan);
+  batchJson.set("actuators/servo/axis_y", currentTilt);
+  batchJson.set("actuators/pump", pumpActive);
+  batchJson.set("actuators/buzzer", buzzerActive);
+  batchJson.set("actuators/auto_pump_active", pumpActive && fireDetected);
 
   // System
-  json.set("system/fire_detected", fireDetected);
-  json.set("system/mode", systemMode);
-  json.set("system/wifi_connected", wifiConnected);
-  json.set("system/firmware_version", FIRMWARE_VERSION);
+  batchJson.set("system/fire_detected", fireDetected);
+  batchJson.set("system/mode", SYSTEM_MODE_STR[systemMode]);
+  batchJson.set("system/wifi_connected", wifiConnected);
+  batchJson.set("system/firmware_version", FIRMWARE_VERSION);
+  batchJson.set("system/sensor_fusion_alert", sensorFusionAlert);
 
-  // Ghi batch — một request duy nhất
-  if (!Firebase.RTDB.updateNode(&fbData, FB_ROOT, &json))
+  esp_task_wdt_reset(); // Feed WDT trước batch write
+
+  if (!Firebase.RTDB.updateNode(&fbData, FB_ROOT, &batchJson))
   {
     Serial.printf("[Firebase] Lỗi ghi batch: %s\n",
                   fbData.errorReason().c_str());
   }
+  else
+  {
+    sensorDataDirty = false;
+    updatePrevValues();
+  }
 }
 
-/*
- * Ghi heartbeat last_seen bằng Unix timestamp UTC từ NTP.
- * App Android: now - last_seen > 15 giây → hiển thị "Offline".
- *
- * Không dùng millis() vì millis() chỉ đếm từ lúc khởi động,
- * không thể so sánh với đồng hồ thực của điện thoại.
- */
 void sendHeartbeat()
 {
   if (millis() - lastHeartbeat < 5000)
@@ -711,12 +1027,7 @@ void sendHeartbeat()
   Firebase.RTDB.setInt(&fbData, FB_ROOT "/system/last_seen", (int)now);
 }
 
-/*
- * Ghi log sự kiện cháy vào logs/{push_key}/ bằng pushJSON.
- * Firebase tự tạo push key duy nhất (timestamp-based, không trùng).
- * Lưu key để ghi resolved_at khi lửa tắt.
- */
-void logFireEvent(const String &action)
+void logFireEvent(const char *action)
 {
   if (!isFirebaseReady())
     return;
@@ -727,13 +1038,13 @@ void logFireEvent(const String &action)
   log.set("temperature", temperature);
   log.set("humidity", humidity);
   log.set("mq2_value", mq2Value);
-  log.set("mq2_level", mq2Level);
-  log.set("flame_direction", flameDirection);
+  log.set("mq2_level", MQ2_LEVEL_STR[mq2Level]);
+  log.set("flame_direction", FLAME_DIR_STR[flameDirection]);
 
-  // Chuỗi pattern 5 ký tự, ví dụ "00100"
-  String pattern = "";
+  char pattern[6] = "00000";
   for (int i = 0; i < 5; i++)
-    pattern += flameDetected[i] ? "1" : "0";
+    if (flameDetected[i]) pattern[i] = '1';
+  pattern[5] = '\0';
 
   log.set("flame_pattern", pattern);
   log.set("servo_x_at_event", currentPan);
@@ -742,7 +1053,8 @@ void logFireEvent(const String &action)
   log.set("pump_activated", true);
   log.set("buzzer_activated", true);
   log.set("alert_was_snoozed", false);
-  log.set("resolved_at", 0); // 0 = sự kiện chưa kết thúc
+  log.set("sensor_fusion_triggered", sensorFusionAlert);
+  log.set("resolved_at", 0);
 
   if (Firebase.RTDB.pushJSON(&fbData, FB_ROOT "/logs", &log))
   {
@@ -756,7 +1068,6 @@ void logFireEvent(const String &action)
   }
 }
 
-/* Cập nhật resolved_at khi sự kiện cháy kết thúc. */
 void resolveLogEvent()
 {
   if (!isFirebaseReady())
@@ -769,7 +1080,6 @@ void resolveLogEvent()
   currentLogKey = "";
 }
 
-/* Kích hoạt FCM: set notification_sent = true để App gửi push. */
 void triggerNotification()
 {
   if (!isFirebaseReady())
@@ -785,7 +1095,6 @@ void triggerNotification()
 //  PHẦN 6 — FIREBASE: ĐỌC LỆNH ĐIỀU KHIỂN
 // ════════════════════════════════════════════════════════════
 
-/* Đồng bộ ngưỡng khi App set thresholds/updated = true. */
 void syncThresholds()
 {
   if (!isFirebaseReady())
@@ -798,17 +1107,23 @@ void syncThresholds()
 
   Serial.println("[Threshold] Cập nhật ngưỡng từ App.");
 
-  if (Firebase.RTDB.getInt(&fbData, FB_ROOT "/thresholds/mq2_safe"))
-    mq2Safe = fbData.intData();
+  esp_task_wdt_reset();
 
-  if (Firebase.RTDB.getInt(&fbData, FB_ROOT "/thresholds/mq2_warning"))
-    mq2Warning = fbData.intData();
+  // Tối ưu #2: Đọc toàn bộ node thresholds/ bằng 1 request
+  if (Firebase.RTDB.getJSON(&fbData, FB_ROOT "/thresholds"))
+  {
+    FirebaseJson &json = fbData.jsonObject();
+    FirebaseJsonData jsonData;
 
-  if (Firebase.RTDB.getFloat(&fbData, FB_ROOT "/thresholds/temp_safe"))
-    tempSafe = fbData.floatData();
-
-  if (Firebase.RTDB.getFloat(&fbData, FB_ROOT "/thresholds/temp_warning"))
-    tempWarning = fbData.floatData();
+    if (json.get(jsonData, "mq2_safe") && jsonData.type == "int")
+      mq2Safe = jsonData.intValue;
+    if (json.get(jsonData, "mq2_warning") && jsonData.type == "int")
+      mq2Warning = jsonData.intValue;
+    if (json.get(jsonData, "temp_safe") && jsonData.type == "float")
+      tempSafe = jsonData.floatValue;
+    if (json.get(jsonData, "temp_warning") && jsonData.type == "float")
+      tempWarning = jsonData.floatValue;
+  }
 
   Firebase.RTDB.setBool(&fbData, FB_ROOT "/thresholds/updated", false);
 
@@ -816,7 +1131,6 @@ void syncThresholds()
                 mq2Safe, mq2Warning, tempSafe, tempWarning);
 }
 
-/* Kiểm tra và reset snooze cảnh báo khi hết thời hạn. */
 void checkSnooze()
 {
   if (!isFirebaseReady() || !ntpSynced)
@@ -840,106 +1154,91 @@ void checkSnooze()
 }
 
 /*
- * Đọc và thực thi lệnh Firebase mỗi 500ms.
+ * Tối ưu #2: handleFirebaseCommands() giờ chỉ xử lý:
+ *   - Đồng bộ ngưỡng (khi App set updated=true)
+ *   - Kiểm tra snooze
+ *   - Đọc mode (1 request thay vì 6-8 request cũ)
  *
- * Ưu tiên an toàn:
- *   Khi fireDetected = true, mọi lệnh manual đều bị bỏ qua.
- *   Hệ thống ép về "auto" và ghi lại Firebase để App đồng bộ.
+ * Lệnh control/ (pump, buzzer, servo) được xử lý qua Stream callback
+ * → ESP32 nhận lệnh ngay lập tức khi App ghi, không bị trễ 500ms
  */
 void handleFirebaseCommands()
 {
-  if (millis() - lastFBCmdRead < 500)
+  if (millis() - lastFBCmdRead < 1000)
     return;
   lastFBCmdRead = millis();
   if (!isFirebaseReady())
     return;
 
+  esp_task_wdt_reset();
+
   // 1. Đồng bộ ngưỡng và snooze
   syncThresholds();
   checkSnooze();
 
+  esp_task_wdt_reset();
+
   // 2. Đọc chế độ hoạt động
   if (Firebase.RTDB.getString(&fbData, FB_ROOT "/system/mode"))
   {
-    systemMode = fbData.stringData();
+    String modeStr = fbData.stringData();
+    if (modeStr == "manual")
+      systemMode = MODE_MANUAL;
+    else
+      systemMode = MODE_AUTO;
   }
 
   // 3. Ưu tiên an toàn: khi cháy → luôn auto
-  if (fireDetected && systemMode != "auto")
+  if (fireDetected && systemMode != MODE_AUTO)
   {
-    systemMode = "auto";
+    systemMode = MODE_AUTO;
     Firebase.RTDB.setString(&fbData, FB_ROOT "/system/mode", "auto");
     Serial.println("[Safety] Đang cháy — ép AUTO, bỏ qua lệnh manual.");
-    return;
   }
-
-  // 4. Xử lý lệnh thủ công (chỉ khi mode = "manual")
-  if (systemMode != "manual")
-    return;
-
-  int panCmd = currentPan;
-  int tiltCmd = currentTilt;
-  bool pumpCmd = false;
-  bool buzzerCmd = false;
-
-  if (Firebase.RTDB.getInt(&fbData, FB_ROOT "/control/servo/axis_x"))
-    panCmd = fbData.intData();
-
-  if (Firebase.RTDB.getInt(&fbData, FB_ROOT "/control/servo/axis_y"))
-    tiltCmd = fbData.intData();
-
-  if (Firebase.RTDB.getBool(&fbData, FB_ROOT "/control/pump_on"))
-    pumpCmd = fbData.boolData();
-
-  if (Firebase.RTDB.getBool(&fbData, FB_ROOT "/control/buzzer_on"))
-    buzzerCmd = fbData.boolData();
-
-  updateServosManual(panCmd, tiltCmd);
-  setPump(pumpCmd);
-  setBuzzer(buzzerCmd);
 }
 
 // ════════════════════════════════════════════════════════════
-//  PHẦN 7 — LOGIC AUTO MODE (STATE MACHINE)
+//  PHẦN 7 — LOGIC AUTO MODE (STATE MACHINE) + SENSOR FUSION
 // ════════════════════════════════════════════════════════════
 
-/*
- * State machine auto mode:
- *
- *  [BÌNH THƯỜNG] ──anyFlameDetected=true──► [PHÁT HIỆN CHÁY]
- *                                              │ Bật còi, điều servo
- *                                              │ Chờ 500ms
- *                                              ↓
- *                                          [BƠM ĐANG CHẠY]
- *                                              │ Cập nhật hướng liên tục
- *                                              │ anyFlameDetected=false
- *                                              ↓
- *                                            [RESET]
- *                                              │ Tắt bơm, còi
- *                                              │ Servo về trung tâm
- *                                              └──────────────────► [BÌNH THƯỜNG]
- */
 void handleAutoMode()
 {
+  // Tối ưu #7: Sensor fusion — kết hợp lửa + nhiệt + khí gas
+  // Kích hoạt khi: có lửa HOẶC (nhiệt cao + khí gas nguy hiểm)
+  bool shouldActivate = anyFlameDetected || sensorFusionAlert;
 
-  // ── CÓ LỬA ────────────────────────────────────────────────
-  if (anyFlameDetected)
+  // ── CÓ NGUY CƠ CHÁY ──────────────────────────────────────
+  if (shouldActivate)
   {
-
     if (!fireDetected)
     {
-      // === Kích hoạt lần đầu ===
       fireDetected = true;
       fireTriggerTime = millis();
       waitingForServo = true;
+      sensorDataDirty = true;
 
       Serial.println("\n[AUTO] PHÁT HIỆN CHÁY! Đang kích hoạt...");
+      if (sensorFusionAlert && !anyFlameDetected)
+        Serial.println("[AUTO] Kích hoạt bởi SENSOR FUSION (nhiệt + khí gas).");
 
       setBuzzer(true);
-      updateServosAuto(flamePriorityIdx);
+
+      // Khởi tạo sweep tilt
+      tiltState = TILT_GOING_DOWN;
+      tiltMoveStart = millis();
+      currentTilt = TILT_SWEEP_MIN;  // Bắt đầu từ 100°
+      servoTilt.write(currentTilt);
+
+      // Nếu có lửa → điều servo theo hướng lửa
+      // Nếu chỉ sensor fusion → giữ servo trung tâm
+      if (anyFlameDetected && flamePriorityIdx >= 0)
+        updateServosAuto(flamePriorityIdx);
+      else
+        updateServosManual(90, 90);
 
       if (isFirebaseReady())
       {
+        esp_task_wdt_reset();
         FirebaseJson fireJson;
         fireJson.set("system/fire_detected", true);
         fireJson.set("actuators/buzzer", true);
@@ -951,7 +1250,7 @@ void handleAutoMode()
       }
     }
 
-    // === Bật bơm sau 500ms — chờ servo ổn định ===
+    // Bật bơm sau 500ms — chờ servo ổn định
     if (waitingForServo && millis() - fireTriggerTime >= 500)
     {
       waitingForServo = false;
@@ -965,37 +1264,58 @@ void handleAutoMode()
       }
     }
 
-    // === Cập nhật hướng servo liên tục nếu lửa di chuyển ===
-    if (!waitingForServo && flamePriorityIdx >= 0)
+    // Cập nhật hướng servo liên tục nếu lửa di chuyển
+    // Trục X: bám theo hướng lửa | Trục Y: quét nâng hạ liên tục
+    if (!waitingForServo)
     {
-      updateServosAuto(flamePriorityIdx);
+      if (anyFlameDetected && flamePriorityIdx >= 0)
+      {
+        // Cập nhật Pan theo hướng lửa mới
+        int newPan = PAN_ANGLES[flamePriorityIdx];
+        if (newPan != currentPan)
+        {
+          currentPan = newPan;
+          servoPan.write(currentPan);
+          Serial.printf("[Servo AUTO] Pan=%d° (mắt #%d)\n", currentPan, flamePriorityIdx + 1);
+        }
+      }
+      // Trục Y luôn quét nâng hạ khi đang cháy
+      sweepTilt();
     }
   }
 
-  // ── LỬA ĐÃ TẮT ────────────────────────────────────────────
+  // ── NGUY CƠ ĐÃ HẾT ────────────────────────────────────────
   else
   {
     if (fireDetected)
     {
       fireDetected = false;
       waitingForServo = false;
+      sensorDataDirty = true;
 
-      Serial.println("[AUTO] Lửa đã tắt — Reset hệ thống.\n");
+      Serial.println("[AUTO] Nguy cơ đã hết — Reset hệ thống.\n");
 
       setPump(false);
+      delay(200); // Chờ dòng ổn định
       setBuzzer(false);
-      updateServosManual(90, 60);
+      delay(200);
+      // Reset servo về trung tâm
+      currentPan = 90;
+      servoPan.write(currentPan);
+      delay(200);
+      resetTiltSweep();
       resolveLogEvent();
 
       if (isFirebaseReady())
       {
+        esp_task_wdt_reset();
         FirebaseJson resetJson;
         resetJson.set("system/fire_detected", false);
         resetJson.set("actuators/pump", false);
         resetJson.set("actuators/buzzer", false);
         resetJson.set("actuators/auto_pump_active", false);
         resetJson.set("actuators/servo/axis_x", 90);
-        resetJson.set("actuators/servo/axis_y", 60);
+        resetJson.set("actuators/servo/axis_y", 90);
         Firebase.RTDB.updateNode(&fbData, FB_ROOT, &resetJson);
       }
     }
@@ -1008,13 +1328,30 @@ void handleAutoMode()
 
 void setup()
 {
-  Serial.begin(9600);
+  // Tối ưu #5: Baud rate 115200 thay vì 9600
+  Serial.begin(115200);
   delay(500);
+
+  // Tắt brownout detector — tránh reset khi servo/bơm gây sụt áp tạm thời
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
+
   Serial.println();
   Serial.println("══════════════════════════════════════════════════");
   Serial.printf("  Hệ thống Chữa Cháy Thông Minh — ESP32 v%s\n",
                 FIRMWARE_VERSION);
   Serial.println("══════════════════════════════════════════════════");
+
+  // Tối ưu #6: Hardware Watchdog Timer (ESP32 Arduino Core 3.x)
+  // Dùng trigger_panic = false để chỉ log warning, KHÔNG reset ESP32
+  // Vì Firebase SSL handshake lần đầu có thể mất 15-25s
+  const esp_task_wdt_config_t wdt_config = {
+    .timeout_ms = WDT_TIMEOUT_S * 1000,
+    .idle_core_mask = 0,
+    .trigger_panic = false  // Chỉ log, không reset
+  };
+  esp_task_wdt_reconfigure(&wdt_config);
+  esp_task_wdt_add(NULL);
+  Serial.printf("[WDT] Watchdog Timer — timeout %ds (warning only)\n", WDT_TIMEOUT_S);
 
   // Khởi động phần cứng
   dht.begin();
@@ -1032,9 +1369,28 @@ void setup()
 
 void loop()
 {
-  // ── 1. Quản lý kết nối mạng ──────────────────────────────
+  // Reset Watchdog mỗi vòng lặp
+  esp_task_wdt_reset();
+
+  // ── 1. Quản lý kết nối mạng (non-blocking) ───────────────
   manageWiFi();
 
+  // ── 2. Đọc cảm biến — LUÔN CHẠY dù có WiFi hay không ────
+  readFlameSensors(); // 100  ms — ưu tiên cao nhất
+  readMQ2();          // 500  ms
+  readDHT11();        // 2000 ms
+
+  // Tối ưu #7: Kiểm tra sensor fusion
+  checkSensorFusion();
+
+  // ── 3. Logic điều khiển — LUÔN CHẠY (local) ──────────────
+  if (systemMode == MODE_AUTO)
+  {
+    handleAutoMode(); // Chữa cháy tự động — hoạt động offline
+  }
+  // Chế độ manual: chỉ hoạt động khi có WiFi (qua Stream callback)
+
+  // ── 4. Giao tiếp Firebase — CHỈ KHI CÓ WIFI ─────────────
   if (wifiConnected)
   {
     // Khởi tạo Firebase lần đầu có mạng
@@ -1056,6 +1412,12 @@ void loop()
       initFirebaseDefaults();
     }
 
+    // Khởi động Stream cho node control/
+    if (fbReady && !streamStarted)
+    {
+      startStream();
+    }
+
     if (!ntpSynced)
     {
       if (!ntpInitStarted)
@@ -1065,22 +1427,10 @@ void loop()
       }
       checkNTPSynced();
     }
+
+    // Ghi dữ liệu lên Firebase
+    writeFirebaseData();      // Batch (2s bình thường / 500ms khi cháy)
+    handleFirebaseCommands(); // Đồng bộ ngưỡng + mode (1s/lần)
+    sendHeartbeat();          // Cập nhật last_seen (5s/lần)
   }
-
-  // ── 2. Đọc cảm biến (non-blocking) ───────────────────────
-  readFlameSensors(); // 100  ms — ưu tiên cao nhất
-  readMQ2();          // 500  ms
-  readDHT11();        // 2000 ms
-
-  // ── 3. Logic điều khiển ──────────────────────────────────
-  if (systemMode == "auto")
-  {
-    handleAutoMode();
-  }
-  // Chế độ manual xử lý trong handleFirebaseCommands()
-
-  // ── 4. Giao tiếp Firebase ────────────────────────────────
-  writeFirebaseData();      // Ghi batch sensor data
-  handleFirebaseCommands(); // Đọc lệnh từ App Android
-  sendHeartbeat();          // Cập nhật last_seen (timestamp NTP)
 }
