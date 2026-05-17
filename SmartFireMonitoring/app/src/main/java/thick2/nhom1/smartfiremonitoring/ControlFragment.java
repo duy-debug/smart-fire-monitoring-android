@@ -197,7 +197,7 @@ public class ControlFragment extends Fragment {
             }
 
             buzzerOn = !buzzerOn;
-                controlRef.child("buzzer_on").setValue(buzzerOn)
+            controlRef.child("buzzer_on").setValue(buzzerOn)
                     .addOnSuccessListener(unused -> updateBuzzerButton())
                     .addOnFailureListener(e -> Toast.makeText(getContext(),
                             "Không ghi được Còi: " + e.getMessage(),
