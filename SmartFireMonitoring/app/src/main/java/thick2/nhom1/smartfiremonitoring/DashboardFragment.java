@@ -1,64 +1,175 @@
 package thick2.nhom1.smartfiremonitoring;
 
+import android.graphics.Color;
 import android.os.Bundle;
-
-import androidx.fragment.app.Fragment;
-
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
+import android.widget.TextView;
+import android.widget.Toast;
 
-/**
- * A simple {@link Fragment} subclass.
- * Use the {@link DashboardFragment#newInstance} factory method to
- * create an instance of this fragment.
- */
+import androidx.annotation.NonNull;
+import androidx.cardview.widget.CardView;
+import androidx.fragment.app.Fragment;
+
+import com.google.firebase.database.DataSnapshot;
+import com.google.firebase.database.DatabaseError;
+import com.google.firebase.database.DatabaseReference;
+import com.google.firebase.database.FirebaseDatabase;
+import com.google.firebase.database.ValueEventListener;
+
 public class DashboardFragment extends Fragment {
+    private DatabaseReference databaseRef;
 
-    // TODO: Rename parameter arguments, choose names that match
-    // the fragment initialization parameters, e.g. ARG_ITEM_NUMBER
-    private static final String ARG_PARAM1 = "param1";
-    private static final String ARG_PARAM2 = "param2";
+    private TextView tvTemp;
+    private TextView tvHumidity;
+    private TextView tvMq2Value;
+    private TextView tvMq2Level;
+    private TextView tvDirection;
+    private TextView tvPump;
+    private TextView tvBuzzer;
+    private TextView tvServoX;
+    private TextView tvServoY;
+    private TextView tvStatus;
 
-    // TODO: Rename and change types of parameters
-    private String mParam1;
-    private String mParam2;
+    private View bannerAlert;
+    private final View[] flameEyes = new View[5];
+    private CardView mq2Card;
 
     public DashboardFragment() {
-        // Required empty public constructor
-    }
-
-    /**
-     * Use this factory method to create a new instance of
-     * this fragment using the provided parameters.
-     *
-     * @param param1 Parameter 1.
-     * @param param2 Parameter 2.
-     * @return A new instance of fragment DashboardFragment.
-     */
-    // TODO: Rename and change types and number of parameters
-    public static DashboardFragment newInstance(String param1, String param2) {
-        DashboardFragment fragment = new DashboardFragment();
-        Bundle args = new Bundle();
-        args.putString(ARG_PARAM1, param1);
-        args.putString(ARG_PARAM2, param2);
-        fragment.setArguments(args);
-        return fragment;
-    }
-
-    @Override
-    public void onCreate(Bundle savedInstanceState) {
-        super.onCreate(savedInstanceState);
-        if (getArguments() != null) {
-            mParam1 = getArguments().getString(ARG_PARAM1);
-            mParam2 = getArguments().getString(ARG_PARAM2);
-        }
     }
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
-        // Inflate the layout for this fragment
-        return inflater.inflate(R.layout.fragment_dashboard, container, false);
+        View view = inflater.inflate(R.layout.fragment_dashboard, container, false);
+
+        databaseRef = FirebaseDatabase.getInstance()
+                .getReference("fire-alarm-system");
+
+        tvTemp = view.findViewById(R.id.tvTemp);
+        tvHumidity = view.findViewById(R.id.tvHumidity);
+        tvMq2Value = view.findViewById(R.id.tvMq2Value);
+        tvMq2Level = view.findViewById(R.id.tvMq2Level);
+        tvDirection = view.findViewById(R.id.tvDirection);
+        tvPump = view.findViewById(R.id.tvPump);
+        tvBuzzer = view.findViewById(R.id.tvBuzzer);
+        tvServoX = view.findViewById(R.id.tvServoX);
+        tvServoY = view.findViewById(R.id.tvServoY);
+        tvStatus = view.findViewById(R.id.tvStatus);
+
+        bannerAlert = view.findViewById(R.id.bannerAlert);
+        mq2Card = view.findViewById(R.id.mq2Card);
+
+        flameEyes[0] = view.findViewById(R.id.eye1);
+        flameEyes[1] = view.findViewById(R.id.eye2);
+        flameEyes[2] = view.findViewById(R.id.eye3);
+        flameEyes[3] = view.findViewById(R.id.eye4);
+        flameEyes[4] = view.findViewById(R.id.eye5);
+
+        listenFirebase();
+        return view;
+    }
+
+    private void listenFirebase() {
+        databaseRef.addValueEventListener(new ValueEventListener() {
+            @Override
+            public void onDataChange(@NonNull DataSnapshot snapshot) {
+                // Đọc dữ liệu cảm biến nhiệt độ và độ ẩm từ Firebase.
+                // Nếu dữ liệu bị thiếu thì hiển thị "--" để tránh crash.
+                Double temp = snapshot.child("sensors/dht11/temperature").getValue(Double.class);
+                Double hum = snapshot.child("sensors/dht11/humidity").getValue(Double.class);
+
+                tvTemp.setText("🌡 " + valueOrPlaceholder(temp, "--") + "°C");
+                tvHumidity.setText("💧 " + valueOrPlaceholder(hum, "--") + "%");
+
+                // Đọc mức khí gas từ MQ-2.
+                // level có thể là safe / warning / danger / unknown.
+                Integer mq2Value = snapshot.child("sensors/mq2/value").getValue(Integer.class);
+                String level = snapshot.child("sensors/mq2/level").getValue(String.class);
+                if (level == null) {
+                    level = "unknown";
+                }
+
+                tvMq2Value.setText("💨 MQ-2: " + valueOrPlaceholder(mq2Value, "--"));
+                tvMq2Level.setText("Mức: " + level.toUpperCase());
+
+                if ("safe".equals(level)) {
+                    mq2Card.setCardBackgroundColor(Color.parseColor("#4CAF50"));
+                } else if ("warning".equals(level)) {
+                    mq2Card.setCardBackgroundColor(Color.parseColor("#FFC107"));
+                } else if ("danger".equals(level)) {
+                    mq2Card.setCardBackgroundColor(Color.parseColor("#F44336"));
+                }
+
+                // Đọc 5 mắt lửa.
+                // Nếu giá trị = 1 thì đổi sang đỏ, ngược lại để xanh.
+                for (int i = 1; i <= 5; i++) {
+                    Integer val = snapshot.child("sensors/flame/eye_" + i).getValue(Integer.class);
+                    if (val != null && val == 1) {
+                        flameEyes[i - 1].setBackgroundResource(R.drawable.eye_status_red);
+                    } else {
+                        flameEyes[i - 1].setBackgroundResource(R.drawable.eye_status_green);
+                    }
+                }
+
+                // Hướng cháy chỉ hiển thị dữ liệu hướng, không dùng để kết luận offline/online.
+                String direction = snapshot.child("sensors/flame/direction").getValue(String.class);
+                tvDirection.setText("Hướng: " + (direction != null ? direction : "--"));
+
+                // Bơm và còi đang được lưu dưới dạng Boolean trong Firebase.
+                // true = ON, false = OFF.
+                Boolean pump = snapshot.child("actuators/pump").getValue(Boolean.class);
+                Boolean buzzer = snapshot.child("actuators/buzzer").getValue(Boolean.class);
+
+                tvPump.setText("Bơm: " + boolToStatus(pump));
+                tvBuzzer.setText("Còi: " + boolToStatus(buzzer));
+
+                // Góc servo là số nguyên, nên đọc kiểu Integer.
+                Integer servoX = snapshot.child("actuators/servo/axis_x").getValue(Integer.class);
+                Integer servoY = snapshot.child("actuators/servo/axis_y").getValue(Integer.class);
+
+                tvServoX.setText("Servo X: " + valueOrPlaceholder(servoX, "--") + "°");
+                tvServoY.setText("Servo Y: " + valueOrPlaceholder(servoY, "--") + "°");
+
+                // Cờ báo cháy dùng để hiện/ẩn banner cảnh báo.
+                Boolean fire = snapshot.child("system/fire_detected").getValue(Boolean.class);
+                bannerAlert.setVisibility(Boolean.TRUE.equals(fire) ? View.VISIBLE : View.GONE);
+
+                // Trạng thái online/offline được quyết định dựa trên last_seen.
+                // Lưu ý: last_seen phải cùng đơn vị với now bên dưới.
+                // Nếu Firebase lưu last_seen theo giây thì dùng System.currentTimeMillis()/1000.
+                // Nếu Firebase lưu theo mili-giây thì đổi now sang System.currentTimeMillis().
+                Long lastSeen = snapshot.child("system/last_seen").getValue(Long.class);
+                if (lastSeen != null) {
+                    long now = System.currentTimeMillis() / 1000;
+                    boolean isOnline = now - lastSeen <= 15;
+                    tvStatus.setText(isOnline ? " Thiết bị: Online" : " Thiết bị: Offline");
+                    tvStatus.setTextColor(isOnline ? Color.parseColor("#4CAF50") : Color.parseColor("#F44336"));
+                } else {
+                    // Nếu chưa có last_seen thì không thể kết luận thiết bị online.
+                    tvStatus.setText(" Thiết bị: --");
+                    tvStatus.setTextColor(Color.GRAY);
+                }
+            }
+
+            @Override
+            public void onCancelled(@NonNull DatabaseError error) {
+                Toast.makeText(getContext(), "Mất kết nối Firebase", Toast.LENGTH_SHORT).show();
+            }
+        });
+    }
+
+    private String boolToStatus(Boolean value) {
+        if (value == null) {
+            return "--";
+        }
+        // Chuyển Boolean trong Firebase thành trạng thái dễ đọc trên giao diện.
+        return value ? "ON" : "OFF";
+    }
+
+    private String valueOrPlaceholder(Object value, String placeholder) {
+        // Trả về giá trị dạng chuỗi hoặc placeholder nếu dữ liệu chưa có.
+        return value != null ? String.valueOf(value) : placeholder;
     }
 }
