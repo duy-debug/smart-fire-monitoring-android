@@ -175,6 +175,8 @@ int currentTilt = 90;
 bool waitingForServo = false;
 unsigned long fireTriggerTime = 0;
 String currentLogKey = "";
+bool alertEnabled = true;
+bool alertSnoozed = false;
 
 // ─────────────────────────────────────────────────────────────
 //  SENSOR FUSION (Tối ưu #7)
@@ -1083,12 +1085,23 @@ void resolveLogEvent()
 void triggerNotification()
 {
   if (!isFirebaseReady())
+  {
+    Serial.println("[Firebase] Báo cháy: Lỗi, Firebase chưa sẵn sàng để gửi notification.");
     return;
+  }
 
   FirebaseJson alertJson;
-  alertJson.set("alert/notification_sent", true);
-  alertJson.set("alert/last_triggered", (int)getTimestamp());
-  Firebase.RTDB.updateNode(&fbData, FB_ROOT, &alertJson);
+  alertJson.set("notification_sent", true);
+  alertJson.set("last_triggered", (int)getTimestamp());
+  
+  if (Firebase.RTDB.updateNode(&fbData, FB_ROOT "/alert", &alertJson))
+  {
+    Serial.println("[Firebase] Đã kích hoạt báo cháy (alert/notification_sent = true) thành công!");
+  }
+  else
+  {
+    Serial.printf("[Firebase] Lỗi kích hoạt báo cháy: %s\n", fbData.errorReason().c_str());
+  }
 }
 
 // ════════════════════════════════════════════════════════════
@@ -1176,6 +1189,25 @@ void handleFirebaseCommands()
   syncThresholds();
   checkSnooze();
 
+  // Đọc cờ enabled và snoozed của hệ thống cảnh báo từ Firebase
+  if (Firebase.RTDB.getBool(&fbData, FB_ROOT "/alert/enabled"))
+  {
+    alertEnabled = fbData.boolData();
+  }
+  else
+  {
+    alertEnabled = true; // Mặc định bật nếu chưa có cấu hình
+  }
+
+  if (Firebase.RTDB.getBool(&fbData, FB_ROOT "/alert/snoozed"))
+  {
+    alertSnoozed = fbData.boolData();
+  }
+  else
+  {
+    alertSnoozed = false;
+  }
+
   esp_task_wdt_reset();
 
   // 2. Đọc chế độ hoạt động
@@ -1206,6 +1238,12 @@ void handleAutoMode()
   // Tối ưu #7: Sensor fusion — kết hợp lửa + nhiệt + khí gas
   // Kích hoạt khi: có lửa HOẶC (nhiệt cao + khí gas nguy hiểm)
   bool shouldActivate = anyFlameDetected || sensorFusionAlert;
+
+  // BĂM CHẶN: Nếu tắt cảnh báo hoặc đang trong thời gian snooze -> Ép không kích hoạt chữa cháy
+  if (!alertEnabled || alertSnoozed)
+  {
+    shouldActivate = false;
+  }
 
   // ── CÓ NGUY CƠ CHÁY ──────────────────────────────────────
   if (shouldActivate)

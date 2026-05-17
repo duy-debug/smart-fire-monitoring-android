@@ -38,14 +38,12 @@ dependencies {
     implementation libs.constraintlayout
     implementation libs.firebase.database
     implementation libs.firebase.auth
+    implementation libs.firebase.messaging
     testImplementation libs.junit
     androidTestImplementation libs.ext.junit
     androidTestImplementation libs.espresso.core
     implementation 'com.github.PhilJay:MPAndroidChart:v3.1.0'
     implementation 'com.google.android.material:material:1.11.0'
     implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
-    implementation 'androidx.cardview:cardview:1.0.0'
-    implementation 'com.google.firebase:firebase-auth'
-    implementation 'com.google.firebase:firebase-database'
     implementation 'androidx.cardview:cardview:1.0.0'
 }
