@@ -1239,7 +1239,7 @@ void handleAutoMode()
   // Kích hoạt khi: có lửa HOẶC (nhiệt cao + khí gas nguy hiểm)
   bool shouldActivate = anyFlameDetected || sensorFusionAlert;
 
-  // BĂM CHẶN: Nếu tắt cảnh báo hoặc đang trong thời gian snooze -> Ép không kích hoạt chữa cháy
+  // alert/enabled=false hoặc snoozed=true → tắt toàn bộ (còi + bơm + servo + notification)
   if (!alertEnabled || alertSnoozed)
   {
     shouldActivate = false;
