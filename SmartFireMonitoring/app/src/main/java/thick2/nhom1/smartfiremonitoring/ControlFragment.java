@@ -486,7 +486,7 @@ public class ControlFragment extends Fragment {
      */
     private void updatePumpButton() {
         boolean displayPump = pumpActualAvailable ? pumpActual : pumpOn;
-        btnPump.setText(displayPump ? "BOM\nBAT" : "BOM\nTAT");
+        btnPump.setText(displayPump ? "💧 BƠM BẬT" : "💧 BƠM TẮT");
         btnPump.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
             displayPump ? Color.parseColor("#BAE6FD") : Color.parseColor("#E0F2FE")));
     }
@@ -498,7 +498,7 @@ public class ControlFragment extends Fragment {
      */
     private void updateBuzzerButton() {
         boolean displayBuzzer = buzzerActualAvailable ? buzzerActual : buzzerOn;
-        btnBuzzer.setText(displayBuzzer ? "COI\nBAT" : "COI\nTAT");
+        btnBuzzer.setText(displayBuzzer ? "🔔 CÒI BẬT" : "🔔 CÒI TẮT");
         btnBuzzer.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
             displayBuzzer ? Color.parseColor("#E9D5FF") : Color.parseColor("#F3E8FF")));
     }
