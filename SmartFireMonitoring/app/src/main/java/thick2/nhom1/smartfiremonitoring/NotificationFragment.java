@@ -33,6 +33,12 @@ import java.util.Map;
  * Đọc/Ghi dữ liệu vào node "alert/" trên Firebase.
  */
 public class NotificationFragment extends Fragment {
+    /**
+     * Fragment Quản lý cảnh báo:
+     * - Bật/tắt thông báo
+     * - Thiết lập snooze tạm thời
+     * - Hiển thị thời gian cảnh báo gần nhất
+     */
 
     // Tham chiếu đến nhánh "alert" trên Firebase
     private DatabaseReference alertRef;
@@ -60,6 +66,7 @@ public class NotificationFragment extends Fragment {
 
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container, Bundle savedInstanceState) {
+        // Inflate layout và ánh xạ toàn bộ view của màn hình cảnh báo
         View view = inflater.inflate(R.layout.fragment_notification, container, false);
 
         // Khởi tạo Database Reference
@@ -83,6 +90,7 @@ public class NotificationFragment extends Fragment {
      * Lắng nghe sự kiện từ giao diện người dùng
      */
     private void setupListeners() {
+        // Listener cho switch, nút snooze và nút reset snooze
         // 1. Khi bật/tắt Switch cảnh báo
         switchAlertEnabled.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (isUpdatingSwitch) return; // Nếu là code tự set thì bỏ qua
@@ -148,6 +156,7 @@ public class NotificationFragment extends Fragment {
      * Lắng nghe cấu hình/thời gian từ Firebase theo Realtime
      */
     private void listenAlertData() {
+        // Lắng nghe dữ liệu alert từ Firebase để đồng bộ giao diện theo thời gian thực
         alertListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
@@ -196,6 +205,7 @@ public class NotificationFragment extends Fragment {
      * Kích hoạt Handler đếm ngược thời gian Snooze trên màn hình
      */
     private void startCountdown() {
+        // Bắt đầu đếm ngược số phút snooze còn lại trên UI
         stopCountdown(); // Dừng bộ đếm cũ nếu đang chạy
         tvCountdown.setVisibility(View.VISIBLE); // Hiện dòng chữ đếm ngược
 
@@ -233,6 +243,7 @@ public class NotificationFragment extends Fragment {
      * Dừng vòng lặp đếm ngược và ẩn dòng chữ
      */
     private void stopCountdown() {
+        // Dừng runnable đếm ngược và ẩn dòng hiển thị thời gian
         if (countdownRunnable != null) {
             countdownHandler.removeCallbacks(countdownRunnable);
             countdownRunnable = null;
@@ -243,6 +254,7 @@ public class NotificationFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        // Gỡ listener và dừng handler khi rời màn hình để tránh rò rỉ bộ nhớ
         // Hủy Handler đếm ngược và Listener khi rời màn hình để giải phóng bộ nhớ
         stopCountdown();
         if (alertRef != null && alertListener != null) {

@@ -22,6 +22,7 @@ import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
 public class MainActivity extends AppCompatActivity {
+    // Activity chính: giữ bottom navigation và điều phối các fragment của app
     BottomNavigationView bottomNav;
 
     @Override
@@ -106,6 +107,7 @@ public class MainActivity extends AppCompatActivity {
         });
     }
     public void loadFragment(Fragment fragment) {
+        // Thay nội dung trong container bằng fragment được chọn ở bottom navigation
         getSupportFragmentManager()
                 .beginTransaction()
                 .replace(R.id.container, fragment)

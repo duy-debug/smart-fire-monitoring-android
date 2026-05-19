@@ -14,6 +14,33 @@
         android:padding="@dimen/screen_padding">
 
         <LinearLayout
+            android:id="@+id/bannerConnection"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:background="@color/chip_warning_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="12dp"
+            android:visibility="gone">
+
+            <View
+                android:layout_width="4dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="12dp"
+                android:background="@color/warning_yellow" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📡 Mất kết nối — Hiển thị dữ liệu cũ"
+                android:textColor="@color/primary_dark"
+                android:textSize="@dimen/body_text_size"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
             android:id="@+id/bannerAlert"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

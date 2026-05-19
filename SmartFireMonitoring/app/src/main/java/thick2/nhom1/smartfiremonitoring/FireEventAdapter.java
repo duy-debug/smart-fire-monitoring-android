@@ -21,6 +21,7 @@ public class FireEventAdapter extends RecyclerView.Adapter<FireEventAdapter.Fire
     private final List<FireEvent> items = new ArrayList<>();
 
     public void submitList(List<FireEvent> newItems) {
+        // Nhận danh sách mới từ fragment và làm mới RecyclerView
         items.clear();
         if (newItems != null) {
             items.addAll(newItems);
@@ -38,6 +39,7 @@ public class FireEventAdapter extends RecyclerView.Adapter<FireEventAdapter.Fire
 
     @Override
     public void onBindViewHolder(@NonNull FireEventViewHolder holder, int position) {
+        // Đổ dữ liệu của từng sự kiện cháy vào card hiển thị
         FireEvent event = items.get(position);
 
         holder.tvTime.setText("🔥 " + event.getDisplayTime());

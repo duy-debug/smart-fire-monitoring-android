@@ -35,6 +35,12 @@ import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
 
+/**
+ * Fragment Lịch sử:
+ * - Đọc logs cháy từ Firebase
+ * - Hiển thị bằng RecyclerView
+ * - Chuyển qua lại giữa danh sách và biểu đồ
+ */
 public class HistoryFragment extends Fragment {
 
     private DatabaseReference rootRef;
@@ -66,6 +72,7 @@ public class HistoryFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
+        // Inflate layout và khởi tạo toàn bộ thành phần hiển thị lịch sử
         View view = inflater.inflate(R.layout.fragment_history, container, false);
 
         rootRef = FirebaseDatabase.getInstance().getReference("fire-alarm-system");
@@ -84,6 +91,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void bindViews(View view) {
+        // Ánh xạ các view trong XML sang biến Java
         recyclerHistory = view.findViewById(R.id.recyclerHistory);
         chartHistory = view.findViewById(R.id.chartHistory);
         tvHistoryEmpty = view.findViewById(R.id.tvHistoryEmpty);
@@ -94,6 +102,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void setupRecyclerView() {
+        // RecyclerView dùng để hiển thị danh sách sự kiện cháy mới nhất
         adapter = new FireEventAdapter();
         recyclerHistory.setLayoutManager(new LinearLayoutManager(requireContext()));
         recyclerHistory.setAdapter(adapter);
@@ -101,6 +110,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void setupChart() {
+        // Cấu hình biểu đồ đường cho nhiệt độ và MQ-2
         chartHistory.setNoDataText("Chưa có sự kiện cháy");
         chartHistory.setDrawGridBackground(false);
         chartHistory.setDragEnabled(true);
@@ -133,6 +143,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void setupToggleGroup() {
+        // Bắt sự kiện chuyển tab giữa danh sách và biểu đồ
         toggleHistoryView.addOnButtonCheckedListener((group, checkedId, isChecked) -> {
             if (!isChecked) {
                 return;
@@ -147,6 +158,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void listenLogs() {
+        // Lấy tối đa 50 log mới nhất từ Firebase
         logsQuery = logsRef.orderByChild("timestamp").limitToLast(50);
         logsListener = new ValueEventListener() {
             @Override
@@ -185,6 +197,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void listenThresholds() {
+        // Lấy ngưỡng cảnh báo hiện tại để kẻ line giới hạn trên biểu đồ
         thresholdsListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
@@ -209,6 +222,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void renderChart(List<FireEvent> ascendingEvents) {
+        // Vẽ dữ liệu sự kiện cháy lên biểu đồ nhiệt độ và MQ-2
         if (ascendingEvents == null || ascendingEvents.isEmpty()) {
             chartHistory.clear();
             chartHistory.invalidate();
@@ -253,7 +267,6 @@ public class HistoryFragment extends Fragment {
 
         YAxis leftAxis = chartHistory.getAxisLeft();
         leftAxis.removeAllLimitLines();
-        leftAxis.removeAllLimitLines();
         LimitLine tempLimit = new LimitLine(tempWarning, "temp_warning");
         tempLimit.enableDashedLine(10f, 8f, 0f);
         tempLimit.setLineColor(Color.parseColor("#F87171"));
@@ -273,6 +286,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void showListView() {
+        // Chế độ hiển thị danh sách sự kiện
         showingChart = false;
         recyclerHistory.setVisibility(View.VISIBLE);
         chartHistory.setVisibility(View.GONE);
@@ -280,6 +294,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void showChartView() {
+        // Chế độ hiển thị biểu đồ
         showingChart = true;
         recyclerHistory.setVisibility(View.GONE);
         chartHistory.setVisibility(View.VISIBLE);
@@ -288,6 +303,7 @@ public class HistoryFragment extends Fragment {
     }
 
     private void updateContentVisibility() {
+        // Đồng bộ hiển thị giữa danh sách, biểu đồ và trạng thái rỗng
         if (showingChart) {
             chartHistory.setVisibility(View.VISIBLE);
             recyclerHistory.setVisibility(View.GONE);
@@ -302,6 +318,7 @@ public class HistoryFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        // Gỡ listener Firebase khi fragment bị huỷ để tránh leak bộ nhớ
         if (logsQuery != null && logsListener != null) {
             logsQuery.removeEventListener(logsListener);
         }

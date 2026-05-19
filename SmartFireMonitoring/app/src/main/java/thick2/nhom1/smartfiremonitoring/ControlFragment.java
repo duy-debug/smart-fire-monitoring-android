@@ -21,6 +21,12 @@ import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 
 public class ControlFragment extends Fragment {
+    /**
+     * Fragment Điều khiển:
+     * - Chuyển AUTO/MANUAL
+     * - Gửi lệnh servo/bơm/còi lên Firebase
+     * - Khóa toàn bộ điều khiển khi hệ thống phát hiện cháy
+     */
     private DatabaseReference controlRef;
     private DatabaseReference systemRef;
     private DatabaseReference actuatorsRef;
@@ -61,6 +67,7 @@ public class ControlFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
+        // Inflate layout điều khiển và chuẩn bị các node Firebase cần dùng
         View view = inflater.inflate(R.layout.fragment_control, container, false);
 
         // Dùng cùng đường dẫn gốc với firmware ESP32
@@ -85,6 +92,7 @@ public class ControlFragment extends Fragment {
     }
 
     private void bindViews(View view) {
+        // Ánh xạ các control từ XML sang Java để xử lý sự kiện
         switchMode = view.findViewById(R.id.switchMode);
         tvServoXValue = view.findViewById(R.id.tvServoXValue);
         tvServoYValue = view.findViewById(R.id.tvServoYValue);
@@ -97,6 +105,7 @@ public class ControlFragment extends Fragment {
     }
 
     private void setDefaultModeToAuto() {
+        // Khi mở màn hình điều khiển thì UI mặc định ở chế độ AUTO an toàn
         isUpdatingUi = true;
         switchMode.setChecked(false);
         isUpdatingUi = false;
@@ -110,6 +119,7 @@ public class ControlFragment extends Fragment {
     }
 
     private void setupModeSwitch() {
+        // Khi người dùng chuyển chế độ, ghi ngay mode mới lên Firebase
         switchMode.setOnCheckedChangeListener((buttonView, isChecked) -> {
             if (isUpdatingUi || fireDetected) {
                 return;
@@ -121,6 +131,7 @@ public class ControlFragment extends Fragment {
     }
 
     private void setupSeekBars() {
+        // Hai thanh kéo dùng để điều khiển góc servo trục X/Y trong chế độ manual
         seekBarServoX.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
@@ -177,6 +188,7 @@ public class ControlFragment extends Fragment {
     }
 
     private void setupActionButtons() {
+        // Hai nút này điều khiển bơm và còi, chỉ hoạt động khi đang ở manual
         btnPump.setOnClickListener(v -> {
             if (fireDetected || !switchMode.isChecked()) {
                 return;
@@ -212,6 +224,7 @@ public class ControlFragment extends Fragment {
      * Cập nhật UI khi có thay đổi từ Firebase hoặc từ các fragment khác.
      */
     private void listenControlState() {
+        // Đồng bộ trạng thái lệnh điều khiển từ Firebase về UI
         controlPumpListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
@@ -268,6 +281,7 @@ public class ControlFragment extends Fragment {
      * Bao gồm: bơm, còi, góc servo trục X/Y, và chỉ báo tự động kích hoạt bơm.
      */
     private void listenActuatorsState() {
+        // Lắng nghe trạng thái thực tế của phần cứng để UI phản ánh đúng trạng thái ESP32
         // Trạng thái thực tế của bơm
         actuatorsPumpListener = new ValueEventListener() {
             @Override
@@ -354,6 +368,7 @@ public class ControlFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        // Gỡ listener khi rời fragment để tránh rò rỉ bộ nhớ
         try {
             if (controlRef != null) {
                 if (controlPumpListener != null) controlRef.child("pump_on").removeEventListener(controlPumpListener);
@@ -383,6 +398,7 @@ public class ControlFragment extends Fragment {
      * Khi nguy cơ kết thúc, mở khóa điều khiển lại.
      */
     private void listenFireDetected() {
+        // Nếu hệ thống báo cháy thì khóa toàn bộ manual control và buộc về AUTO
         fireListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
@@ -415,6 +431,7 @@ public class ControlFragment extends Fragment {
      * @param mode "auto" hoặc "manual"
      */
     private void writeMode(String mode) {
+        // Ghi mode hiện tại lên Firebase, đồng thời reset lệnh manual khi quay về AUTO
         systemRef.child("mode").setValue(mode)
             .addOnSuccessListener(unused -> {
                 Toast.makeText(getContext(),
@@ -448,6 +465,7 @@ public class ControlFragment extends Fragment {
      * @param manualMode true = chế độ MANUAL; false = chế độ AUTO
      */
     private void syncUiFromCurrentMode(boolean manualMode) {
+        // Đồng bộ trạng thái enable/disable của UI theo chế độ hiện tại
         if (fireDetected) {
             setControlsEnabled(false);
             fireLockBanner.setVisibility(View.VISIBLE);
@@ -473,6 +491,7 @@ public class ControlFragment extends Fragment {
     }
 
     private void setControlsEnabled(boolean enabled) {
+        // Bật/tắt toàn bộ control cùng lúc để tránh thao tác sai trạng thái
         seekBarServoX.setEnabled(enabled);
         seekBarServoY.setEnabled(enabled);
         btnPump.setEnabled(enabled);
@@ -485,6 +504,7 @@ public class ControlFragment extends Fragment {
      * Hiển thị: "BOM BẬT" (xanh) hoặc "BOM TẮT" (nhạt)
      */
     private void updatePumpButton() {
+        // Cập nhật text/màu của nút bơm dựa trên trạng thái thực tế hoặc trạng thái lệnh
         boolean displayPump = pumpActualAvailable ? pumpActual : pumpOn;
         btnPump.setText(displayPump ? "💧 BƠM BẬT" : "💧 BƠM TẮT");
         btnPump.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
@@ -497,6 +517,7 @@ public class ControlFragment extends Fragment {
      * Hiển thị: "COI BẬT" (tím) hoặc "COI TẮT" (nhạt)
      */
     private void updateBuzzerButton() {
+        // Cập nhật text/màu của nút còi theo logic giống nút bơm
         boolean displayBuzzer = buzzerActualAvailable ? buzzerActual : buzzerOn;
         btnBuzzer.setText(displayBuzzer ? "🔔 CÒI BẬT" : "🔔 CÒI TẮT");
         btnBuzzer.setBackgroundTintList(android.content.res.ColorStateList.valueOf(
