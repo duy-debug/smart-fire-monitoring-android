@@ -47,24 +47,30 @@ public class FireEventAdapter extends RecyclerView.Adapter<FireEventAdapter.Fire
         holder.tvPattern.setText("Pattern: " + event.getFlamePattern());
         holder.tvAction.setText("Xử lý: " + event.getActionTaken());
         holder.tvDuration.setText("Thời gian: " + event.getProcessingDuration());
-        holder.tvLevel.setText(event.getMq2Level().toUpperCase(Locale.getDefault()));
+        String level = event.getMq2Level().toLowerCase(Locale.getDefault());
+        holder.tvLevel.setText(level.toUpperCase(Locale.getDefault()));
 
         int levelColor;
-        switch (event.getMq2Level().toLowerCase(Locale.getDefault())) {
+        int levelTextColor;
+        switch (level) {
             case "danger":
                 levelColor = Color.parseColor("#FEE2E2");
+                levelTextColor = Color.parseColor("#B91C1C");
                 holder.cardRoot.setStrokeColor(Color.parseColor("#EF4444"));
                 break;
             case "warning":
                 levelColor = Color.parseColor("#FEF3C7");
+                levelTextColor = Color.parseColor("#B45309");
                 holder.cardRoot.setStrokeColor(Color.parseColor("#F59E0B"));
                 break;
             default:
                 levelColor = Color.parseColor("#DCFCE7");
+                levelTextColor = Color.parseColor("#166534");
                 holder.cardRoot.setStrokeColor(Color.parseColor("#10B981"));
                 break;
         }
         holder.tvLevel.setBackgroundTintList(ColorStateList.valueOf(levelColor));
+        holder.tvLevel.setTextColor(levelTextColor);
 
         if ("manual".equalsIgnoreCase(event.getActionTaken())) {
             holder.tvAction.setBackgroundTintList(ColorStateList.valueOf(Color.parseColor("#E9D5FF")));

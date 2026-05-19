@@ -1,5 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <color name="safe_green">#4CAF50</color>
+    <color name="warning_yellow">#FFC107</color>
+    <color name="danger_red">#F44336</color>
+    <color name="primary">#1976D2</color>
+    <color name="primary_dark">#0D47A1</color>
+    <color name="background">#F5F5F5</color>
+
+    <color name="surface">#FFFFFF</color>
+    <color name="surface_variant">#F8FAFC</color>
+    <color name="text_primary">#0F172A</color>
+    <color name="text_secondary">#64748B</color>
+    <color name="border">#E2E8F0</color>
+    <color name="chip_safe_bg">#DCFCE7</color>
+    <color name="chip_warning_bg">#FEF3C7</color>
+    <color name="chip_danger_bg">#FEE2E2</color>
+    <color name="chip_info_bg">#DBEAFE</color>
+    <color name="chip_neutral_bg">#EEF2FF</color>
     <color name="black">#FF000000</color>
     <color name="white">#FFFFFFFF</color>
 </resources>

@@ -4,7 +4,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F5F7FA"
+    android:background="@color/background"
     android:orientation="vertical"
     android:padding="16dp"
     tools:context=".HistoryFragment">
@@ -12,24 +12,24 @@
     <com.google.android.material.card.MaterialCardView
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        app:cardBackgroundColor="#FFFFFF"
-        app:cardCornerRadius="24dp"
-        app:cardElevation="2dp"
-        app:strokeColor="#E8EDF3"
+        app:cardBackgroundColor="@color/surface"
+        app:cardCornerRadius="@dimen/card_corner_radius"
+        app:cardElevation="@dimen/card_elevation"
+        app:strokeColor="@color/border"
         app:strokeWidth="1dp">
 
         <LinearLayout
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:orientation="vertical"
-            android:padding="18dp">
+            android:padding="@dimen/card_padding">
 
             <TextView
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:text="LỊCH SỬ SỰ KIỆN CHÁY"
-                android:textColor="#0F172A"
-                android:textSize="20sp"
+                android:textColor="@color/text_primary"
+                android:textSize="@dimen/title_text_size"
                 android:textStyle="bold" />
 
             <TextView
@@ -37,20 +37,20 @@
                 android:layout_height="wrap_content"
                 android:layout_marginTop="4dp"
                 android:text="Xem lại các sự kiện cháy đã ghi nhận trên Firebase"
-                android:textColor="#64748B"
-                android:textSize="13sp" />
+                android:textColor="@color/text_secondary"
+                android:textSize="@dimen/body_text_size" />
 
             <TextView
                 android:id="@+id/tvHistoryCount"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
                 android:layout_marginTop="12dp"
-                android:background="#EEF2FF"
-                android:paddingHorizontal="12dp"
+                android:background="@color/chip_neutral_bg"
+                android:paddingHorizontal="@dimen/content_padding"
                 android:paddingVertical="6dp"
                 android:text="0 sự kiện"
-                android:textColor="#4338CA"
-                android:textSize="12sp"
+                android:textColor="@color/primary_dark"
+                android:textSize="@dimen/caption_text_size"
                 android:textStyle="bold" />
         </LinearLayout>
     </com.google.android.material.card.MaterialCardView>
@@ -59,8 +59,8 @@
         android:id="@+id/toggleHistoryView"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="14dp"
-        android:layout_marginBottom="14dp"
+        android:layout_marginTop="16dp"
+        android:layout_marginBottom="16dp"
         app:checkedButton="@id/btnHistoryList"
         app:selectionRequired="true"
         app:singleSelection="true">
