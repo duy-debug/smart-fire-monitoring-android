@@ -20,6 +20,15 @@
         android:id="@+id/bottomNav"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
+        android:background="@color/surface"
+        app:itemIconSize="20dp"
+        app:itemIconTint="@color/bottom_nav_selector"
+        app:itemTextAppearanceActive="@style/TextAppearance.SmartFireMonitoring.BottomNav"
+        app:itemTextAppearanceInactive="@style/TextAppearance.SmartFireMonitoring.BottomNav"
+        app:itemTextColor="@color/bottom_nav_selector"
+        app:itemRippleColor="@android:color/transparent"
+        app:itemBackground="@android:color/transparent"
+        app:labelVisibilityMode="labeled"
         app:menu="@menu/bottom_nav_menu" />
 
 </LinearLayout>
