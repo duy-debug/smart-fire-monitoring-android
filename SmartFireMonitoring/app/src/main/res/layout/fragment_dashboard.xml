@@ -3,8 +3,8 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:fillViewport="true"
     android:background="@color/background"
+    android:fillViewport="true"
     android:overScrollMode="never">
 
     <LinearLayout
@@ -114,9 +114,9 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
                         android:text="Smart Fire Monitoring"
-                    android:textColor="@color/text_primary"
-                    android:textSize="@dimen/title_text_size"
-                    android:textStyle="bold" />
+                        android:textColor="@color/text_primary"
+                        android:textSize="@dimen/title_text_size"
+                        android:textStyle="bold" />
 
                     <View
                         android:layout_width="0dp"
@@ -126,13 +126,13 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                    android:background="@color/chip_neutral_bg"
+                        android:background="@color/chip_neutral_bg"
                         android:paddingHorizontal="10dp"
                         android:paddingVertical="5dp"
                         android:text="IoT"
-                    android:textColor="@color/primary_dark"
-                    android:textSize="@dimen/caption_text_size"
-                    android:textStyle="bold" />
+                        android:textColor="@color/primary_dark"
+                        android:textSize="@dimen/caption_text_size"
+                        android:textStyle="bold" />
                 </LinearLayout>
 
                 <TextView
@@ -154,9 +154,10 @@
                     android:paddingVertical="12dp">
 
                     <View
+                        android:id="@+id/viewStatusDot"
                         android:layout_width="10dp"
                         android:layout_height="10dp"
-                        android:background="#22C55E" />
+                        android:background="@drawable/eye_status_green" />
 
                     <TextView
                         android:id="@+id/tvStatus"
@@ -169,11 +170,12 @@
                         android:textStyle="bold" />
 
                     <TextView
+                        android:id="@+id/tvFirmwareVersion"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:gravity="end"
-                        android:text="v2.2.0"
+                        android:text="FW: --"
                         android:textColor="@color/text_secondary"
                         android:textSize="@dimen/caption_text_size" />
                 </LinearLayout>
