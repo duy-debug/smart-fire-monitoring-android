@@ -9,6 +9,8 @@
 
     <color name="surface">#FFFFFF</color>
     <color name="surface_variant">#F8FAFC</color>
+    <color name="card_surface">#F7FBFF</color>
+    <color name="surface_soft">#EEF6FF</color>
     <color name="text_primary">#0F172A</color>
     <color name="text_secondary">#64748B</color>
     <color name="border">#E2E8F0</color>

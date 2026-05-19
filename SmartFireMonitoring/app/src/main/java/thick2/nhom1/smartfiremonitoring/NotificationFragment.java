@@ -42,6 +42,7 @@ public class NotificationFragment extends Fragment {
     private SwitchMaterial switchAlertEnabled;
     private TextInputEditText etSnoozeDuration;
     private MaterialButton btnSnooze;
+    private MaterialButton btnResetSnooze;
     private TextView tvCountdown;
     private TextView tvLastTriggered;
 
@@ -68,6 +69,7 @@ public class NotificationFragment extends Fragment {
         switchAlertEnabled = view.findViewById(R.id.switchAlertEnabled);
         etSnoozeDuration = view.findViewById(R.id.etSnoozeDuration);
         btnSnooze = view.findViewById(R.id.btnSnooze);
+        btnResetSnooze = view.findViewById(R.id.btnResetSnooze);
         tvCountdown = view.findViewById(R.id.tvCountdown);
         tvLastTriggered = view.findViewById(R.id.tvLastTriggered);
 
@@ -122,6 +124,22 @@ public class NotificationFragment extends Fragment {
 
             alertRef.updateChildren(updates)
                     .addOnSuccessListener(unused -> Toast.makeText(getContext(), "Đã tạm tắt cảnh báo " + minutes + " phút", Toast.LENGTH_SHORT).show())
+                    .addOnFailureListener(e -> Toast.makeText(getContext(), "Lỗi: " + e.getMessage(), Toast.LENGTH_SHORT).show());
+        });
+
+        // 3. Khi nhấn nút Reset Snooze: xóa toàn bộ trạng thái tạm tắt cảnh báo
+        btnResetSnooze.setOnClickListener(v -> {
+            Map<String, Object> updates = new HashMap<>();
+            updates.put("snoozed", false);
+            updates.put("snooze_until", 0);
+            updates.put("snooze_duration_min", 0);
+
+            alertRef.updateChildren(updates)
+                    .addOnSuccessListener(unused -> {
+                        stopCountdown();
+                        etSnoozeDuration.setText("10");
+                        Toast.makeText(getContext(), "Đã reset tạm tắt cảnh báo", Toast.LENGTH_SHORT).show();
+                    })
                     .addOnFailureListener(e -> Toast.makeText(getContext(), "Lỗi: " + e.getMessage(), Toast.LENGTH_SHORT).show());
         });
     }
