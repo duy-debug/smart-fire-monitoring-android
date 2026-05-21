@@ -3,22 +3,22 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:background="@color/background"
     android:fillViewport="true"
-    android:background="#F5F7FA"
     android:overScrollMode="never">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="@dimen/screen_padding">
 
         <LinearLayout
-            android:id="@+id/bannerAlert"
+            android:id="@+id/bannerConnection"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="14dp"
-            android:background="#FFE8E8"
+            android:layout_marginBottom="16dp"
+            android:background="@color/chip_warning_bg"
             android:gravity="center_vertical"
             android:orientation="horizontal"
             android:paddingHorizontal="14dp"
@@ -29,7 +29,34 @@
                 android:layout_width="4dp"
                 android:layout_height="match_parent"
                 android:layout_marginEnd="12dp"
-                android:background="#E53935" />
+                android:background="@color/warning_yellow" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="📡 Mất kết nối — Hiển thị dữ liệu cũ"
+                android:textColor="@color/primary_dark"
+                android:textSize="@dimen/body_text_size"
+                android:textStyle="bold" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:id="@+id/bannerAlert"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            android:background="@color/chip_danger_bg"
+            android:gravity="center_vertical"
+            android:orientation="horizontal"
+            android:paddingHorizontal="14dp"
+            android:paddingVertical="12dp"
+            android:visibility="gone">
+
+            <View
+                android:layout_width="4dp"
+                android:layout_height="match_parent"
+                android:layout_marginEnd="12dp"
+                android:background="@color/danger_red" />
 
             <LinearLayout
                 android:layout_width="0dp"
@@ -41,8 +68,8 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:text="CẢNH BÁO CHÁY"
-                    android:textColor="#B71C1C"
-                    android:textSize="14sp"
+                    android:textColor="@color/danger_red"
+                    android:textSize="@dimen/body_text_size"
                     android:textStyle="bold" />
 
                 <TextView
@@ -50,8 +77,8 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="2dp"
                     android:text="Hệ thống phát hiện nguy cơ cháy, vui lòng kiểm tra ngay."
-                    android:textColor="#8E1B1B"
-                    android:textSize="12sp" />
+                    android:textColor="@color/danger_red"
+                    android:textSize="@dimen/caption_text_size" />
             </LinearLayout>
         </LinearLayout>
 
@@ -59,17 +86,17 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="#FFFFFF"
-            app:cardCornerRadius="24dp"
-            app:cardElevation="2dp"
-            app:strokeColor="#E8EDF3"
+            app:cardBackgroundColor="@color/surface"
+            app:cardCornerRadius="@dimen/card_corner_radius"
+            app:cardElevation="@dimen/card_elevation"
+            app:strokeColor="@color/border"
             app:strokeWidth="1dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="18dp">
+                android:padding="@dimen/card_padding">
 
                 <LinearLayout
                     android:layout_width="match_parent"
@@ -87,8 +114,8 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
                         android:text="Smart Fire Monitoring"
-                        android:textColor="#0F172A"
-                        android:textSize="20sp"
+                        android:textColor="@color/text_primary"
+                        android:textSize="@dimen/title_text_size"
                         android:textStyle="bold" />
 
                     <View
@@ -99,12 +126,12 @@
                     <TextView
                         android:layout_width="wrap_content"
                         android:layout_height="wrap_content"
-                        android:background="#EEF2FF"
+                        android:background="@color/chip_neutral_bg"
                         android:paddingHorizontal="10dp"
                         android:paddingVertical="5dp"
                         android:text="IoT"
-                        android:textColor="#4338CA"
-                        android:textSize="11sp"
+                        android:textColor="@color/primary_dark"
+                        android:textSize="@dimen/caption_text_size"
                         android:textStyle="bold" />
                 </LinearLayout>
 
@@ -113,23 +140,24 @@
                     android:layout_height="wrap_content"
                     android:layout_marginTop="6dp"
                     android:text="Theo dõi cảm biến và cơ cấu chấp hành theo thời gian thực"
-                    android:textColor="#64748B"
-                    android:textSize="13sp" />
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/body_text_size" />
 
                 <LinearLayout
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="16dp"
-                    android:background="#F8FAFC"
+                    android:background="@color/surface_variant"
                     android:gravity="center_vertical"
                     android:orientation="horizontal"
                     android:paddingHorizontal="14dp"
                     android:paddingVertical="12dp">
 
                     <View
+                        android:id="@+id/viewStatusDot"
                         android:layout_width="10dp"
                         android:layout_height="10dp"
-                        android:background="#22C55E" />
+                        android:background="@drawable/eye_status_green" />
 
                     <TextView
                         android:id="@+id/tvStatus"
@@ -137,18 +165,19 @@
                         android:layout_height="wrap_content"
                         android:layout_marginStart="10dp"
                         android:text=" Thiết bị: Online"
-                        android:textColor="#16A34A"
-                        android:textSize="14sp"
+                        android:textColor="@color/safe_green"
+                        android:textSize="@dimen/body_text_size"
                         android:textStyle="bold" />
 
                     <TextView
+                        android:id="@+id/tvFirmwareVersion"
                         android:layout_width="0dp"
                         android:layout_height="wrap_content"
                         android:layout_weight="1"
                         android:gravity="end"
-                        android:text="v2.2.0"
-                        android:textColor="#94A3B8"
-                        android:textSize="12sp" />
+                        android:text="FW: --"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="@dimen/caption_text_size" />
                 </LinearLayout>
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

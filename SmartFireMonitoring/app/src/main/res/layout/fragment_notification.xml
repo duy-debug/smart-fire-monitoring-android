@@ -3,52 +3,107 @@
     xmlns:app="http://schemas.android.com/apk/res-auto"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#F8FAFC"
+    android:background="@color/background"
     android:fillViewport="true">
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:orientation="vertical"
-        android:padding="16dp">
+        android:padding="@dimen/screen_padding">
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:layout_marginBottom="24dp"
-            android:gravity="center"
-            android:text="🔔 Quản lý Cảnh báo"
-            android:textColor="#0F172A"
-            android:textSize="24sp"
-            android:textStyle="bold" />
-
-        <!-- Cảnh báo chính -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="@android:color/white"
-            app:cardCornerRadius="16dp"
+            app:cardBackgroundColor="@color/card_surface"
+            app:cardCornerRadius="18dp"
             app:cardElevation="2dp"
-            app:strokeColor="#E2E8F0"
-            app:strokeWidth="1dp">
+            app:strokeWidth="0dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:orientation="horizontal"
-                android:padding="20dp"
-                android:gravity="center_vertical">
+                android:orientation="vertical"
+                android:padding="@dimen/card_padding">
+
+                <LinearLayout
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:gravity="center_vertical"
+                    android:orientation="horizontal">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Quản lý Cảnh báo"
+                        android:textAppearance="@style/TextAppearance.SmartFireMonitoring.ScreenTitle" />
+
+                    <View
+                        android:layout_width="0dp"
+                        android:layout_height="0dp"
+                        android:layout_weight="1" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:background="@drawable/bg_chip_warning"
+                        android:paddingHorizontal="10dp"
+                        android:paddingVertical="5dp"
+                        android:text="ALERT"
+                        android:textColor="#9A3412"
+                        android:textSize="@dimen/caption_text_size"
+                        android:textStyle="bold" />
+                </LinearLayout>
 
                 <TextView
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Bật/tắt cảnh báo, tạm ngưng và theo dõi lần phát hiện gần nhất"
+                    android:textColor="@color/text_secondary"
+                    android:textSize="@dimen/body_text_size" />
+            </LinearLayout>
+        </com.google.android.material.card.MaterialCardView>
+
+        <com.google.android.material.card.MaterialCardView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="@color/card_surface"
+            app:cardCornerRadius="18dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp">
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:gravity="center_vertical"
+                android:orientation="horizontal"
+                android:padding="@dimen/card_padding">
+
+                <LinearLayout
                     android:layout_width="0dp"
                     android:layout_height="wrap_content"
                     android:layout_weight="1"
-                    android:text="Cho phép cảnh báo"
-                    android:textColor="#334155"
-                    android:textSize="18sp"
-                    android:textStyle="bold" />
+                    android:orientation="vertical">
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:text="Cho phép cảnh báo"
+                        android:textColor="@color/text_primary"
+                        android:textSize="@dimen/body_text_size"
+                        android:textStyle="bold" />
+
+                    <TextView
+                        android:layout_width="wrap_content"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="2dp"
+                        android:text="Bật/tắt toàn bộ luồng cảnh báo của hệ thống"
+                        android:textColor="@color/text_secondary"
+                        android:textSize="@dimen/caption_text_size" />
+                </LinearLayout>
 
                 <com.google.android.material.switchmaterial.SwitchMaterial
                     android:id="@+id/switchAlertEnabled"
@@ -58,42 +113,36 @@
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Tạm tắt (Snooze) -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="24dp"
-            app:cardBackgroundColor="@android:color/white"
-            app:cardCornerRadius="16dp"
+            android:layout_marginBottom="16dp"
+            app:cardBackgroundColor="@color/card_surface"
+            app:cardCornerRadius="18dp"
             app:cardElevation="2dp"
-            app:strokeColor="#E2E8F0"
-            app:strokeWidth="1dp">
+            app:strokeWidth="0dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="20dp">
+                android:padding="@dimen/card_padding">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="16dp"
-                    android:text="😴 Tạm tắt (Snooze)"
-                    android:textColor="#334155"
+                    android:layout_marginBottom="12dp"
+                    android:text="Tạm tắt (Snooze)"
+                    android:textColor="@color/text_primary"
                     android:textSize="16sp"
                     android:textStyle="bold" />
 
                 <com.google.android.material.textfield.TextInputLayout
-                    style="@style/Widget.MaterialComponents.TextInputLayout.OutlinedBox"
+                    style="@style/Widget.SmartFireMonitoring.InputLayout"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginBottom="16dp"
-                    android:hint="Thời gian (phút)"
-                    app:boxCornerRadiusBottomEnd="8dp"
-                    app:boxCornerRadiusBottomStart="8dp"
-                    app:boxCornerRadiusTopEnd="8dp"
-                    app:boxCornerRadiusTopStart="8dp">
+                    android:layout_marginBottom="12dp"
+                    android:hint="Thời gian (phút)">
 
                     <com.google.android.material.textfield.TextInputEditText
                         android:id="@+id/etSnoozeDuration"
@@ -105,51 +154,54 @@
 
                 <com.google.android.material.button.MaterialButton
                     android:id="@+id/btnSnooze"
+                    style="@style/Widget.SmartFireMonitoring.PrimaryButton"
                     android:layout_width="match_parent"
-                    android:layout_height="60dp"
-                    android:text="TẠM TẮT CẢNH BÁO"
-                    android:textSize="16sp"
-                    android:textStyle="bold"
-                    app:cornerRadius="12dp" />
-                    
+                    android:layout_height="48dp"
+                    android:text="Tạm tắt cảnh báo" />
+
+                <com.google.android.material.button.MaterialButton
+                    android:id="@+id/btnResetSnooze"
+                    style="@style/Widget.SmartFireMonitoring.SecondaryButton"
+                    android:layout_width="match_parent"
+                    android:layout_height="48dp"
+                    android:layout_marginTop="10dp"
+                    android:text="Reset tạm tắt" />
+
                 <TextView
                     android:id="@+id/tvCountdown"
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
-                    android:layout_marginTop="16dp"
+                    android:layout_marginTop="12dp"
                     android:gravity="center"
                     android:text="⏱️ Đang tạm tắt: còn --:--"
-                    android:textColor="#D97706"
-                    android:textSize="16sp"
+                    android:textColor="@color/warning_yellow"
+                    android:textSize="@dimen/body_text_size"
                     android:textStyle="bold"
                     android:visibility="gone" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
-        <!-- Lần cháy gần nhất -->
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            app:cardBackgroundColor="#FEF2F2"
-            app:cardCornerRadius="16dp"
-            app:cardElevation="0dp"
-            app:strokeColor="#FECACA"
-            app:strokeWidth="1dp">
+            app:cardBackgroundColor="@color/chip_danger_bg"
+            app:cardCornerRadius="18dp"
+            app:cardElevation="2dp"
+            app:strokeWidth="0dp">
 
             <LinearLayout
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
                 android:orientation="vertical"
-                android:padding="20dp">
+                android:padding="@dimen/card_padding">
 
                 <TextView
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginBottom="8dp"
-                    android:text="Lần phát hiện cháy gần nhất:"
-                    android:textColor="#991B1B"
-                    android:textSize="14sp"
+                    android:text="Lần phát hiện cháy gần nhất"
+                    android:textColor="@color/danger_red"
+                    android:textSize="@dimen/caption_text_size"
                     android:textStyle="bold" />
 
                 <TextView
@@ -157,8 +209,8 @@
                     android:layout_width="match_parent"
                     android:layout_height="wrap_content"
                     android:text="Chưa có dữ liệu"
-                    android:textColor="#DC2626"
-                    android:textSize="18sp"
+                    android:textColor="@color/danger_red"
+                    android:textSize="@dimen/body_text_size"
                     android:textStyle="bold" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>

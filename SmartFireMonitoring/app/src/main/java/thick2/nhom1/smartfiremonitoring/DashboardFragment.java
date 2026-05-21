@@ -1,7 +1,15 @@
 package thick2.nhom1.smartfiremonitoring;
 
+import android.content.BroadcastReceiver;
+import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.graphics.Color;
+import android.net.ConnectivityManager;
+import android.net.NetworkInfo;
 import android.os.Bundle;
+import android.os.Handler;
+import android.os.Looper;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,7 +26,17 @@ import com.google.firebase.database.DatabaseReference;
 import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 
+/**
+ * Fragment Trang chủ:
+ * - Hiển thị dữ liệu cảm biến realtime
+ * - Theo dõi trạng thái kết nối internet của điện thoại
+ * - Theo dõi ESP32 online/offline dựa trên last_seen
+ */
 public class DashboardFragment extends Fragment {
+
+    private static final long ESP32_OFFLINE_THRESHOLD_SECONDS = 10L;
+    private static final long ESP32_CHECK_INTERVAL_MS = 5000L;
+
     private DatabaseReference databaseRef;
 
     private TextView tvTemp;
@@ -31,10 +49,20 @@ public class DashboardFragment extends Fragment {
     private TextView tvServoX;
     private TextView tvServoY;
     private TextView tvStatus;
+    private TextView tvFirmwareVersion;
+    private View statusDot;
 
+    private View bannerConnection;
     private View bannerAlert;
     private final View[] flameEyes = new View[5];
     private CardView mq2Card;
+
+    private BroadcastReceiver connectivityReceiver;
+    private final Handler statusHandler = new Handler(Looper.getMainLooper());
+    private Runnable statusRunnable;
+
+    private long lastSeenTimestamp = 0L;
+    private String firmwareVersion = "--";
 
     public DashboardFragment() {
     }
@@ -42,10 +70,10 @@ public class DashboardFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
+        // Inflate layout dashboard và ánh xạ các view hiển thị dữ liệu realtime
         View view = inflater.inflate(R.layout.fragment_dashboard, container, false);
 
-        databaseRef = FirebaseDatabase.getInstance()
-                .getReference("fire-alarm-system");
+        databaseRef = FirebaseDatabase.getInstance().getReference("fire-alarm-system");
 
         tvTemp = view.findViewById(R.id.tvTemp);
         tvHumidity = view.findViewById(R.id.tvHumidity);
@@ -57,7 +85,10 @@ public class DashboardFragment extends Fragment {
         tvServoX = view.findViewById(R.id.tvServoX);
         tvServoY = view.findViewById(R.id.tvServoY);
         tvStatus = view.findViewById(R.id.tvStatus);
+        tvFirmwareVersion = view.findViewById(R.id.tvFirmwareVersion);
+        statusDot = view.findViewById(R.id.viewStatusDot);
 
+        bannerConnection = view.findViewById(R.id.bannerConnection);
         bannerAlert = view.findViewById(R.id.bannerAlert);
         mq2Card = view.findViewById(R.id.mq2Card);
 
@@ -68,29 +99,43 @@ public class DashboardFragment extends Fragment {
         flameEyes[4] = view.findViewById(R.id.eye5);
 
         listenFirebase();
+        updateConnectivityBanner();
+        startEsp32StatusMonitor();
         return view;
     }
 
+    @Override
+    public void onResume() {
+        super.onResume();
+        registerConnectivityReceiver();
+        startEsp32StatusMonitor();
+        updateConnectivityBanner();
+    }
+
+    @Override
+    public void onPause() {
+        super.onPause();
+        unregisterConnectivityReceiver();
+        stopEsp32StatusMonitor();
+    }
+
     private void listenFirebase() {
+        // Nghe toàn bộ node gốc để UI tự cập nhật khi Firebase có dữ liệu mới hoặc dữ liệu cache
         databaseRef.addValueEventListener(new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
-                // Đọc dữ liệu cảm biến nhiệt độ và độ ẩm từ Firebase.
-                // Nếu dữ liệu bị thiếu thì hiển thị "--" để tránh crash.
+                // Đọc nhiệt độ và độ ẩm từ DHT11
                 Double temp = snapshot.child("sensors/dht11/temperature").getValue(Double.class);
                 Double hum = snapshot.child("sensors/dht11/humidity").getValue(Double.class);
+                tvTemp.setText("🌡 Nhiệt độ: " + valueOrPlaceholder(temp, "--") + "°C");
+                tvHumidity.setText("💧 Độ ẩm: " + valueOrPlaceholder(hum, "--") + "%");
 
-                tvTemp.setText("🌡 " + valueOrPlaceholder(temp, "--") + "°C");
-                tvHumidity.setText("💧 " + valueOrPlaceholder(hum, "--") + "%");
-
-                // Đọc mức khí gas từ MQ-2.
-                // level có thể là safe / warning / danger / unknown.
+                // Đọc MQ-2
                 Integer mq2Value = snapshot.child("sensors/mq2/value").getValue(Integer.class);
                 String level = snapshot.child("sensors/mq2/level").getValue(String.class);
                 if (level == null) {
                     level = "unknown";
                 }
-
                 tvMq2Value.setText("💨 MQ-2: " + valueOrPlaceholder(mq2Value, "--"));
                 tvMq2Level.setText("Mức: " + level.toUpperCase());
 
@@ -102,8 +147,7 @@ public class DashboardFragment extends Fragment {
                     mq2Card.setCardBackgroundColor(Color.parseColor("#F44336"));
                 }
 
-                // Đọc 5 mắt lửa.
-                // Nếu giá trị = 1 thì đổi sang đỏ, ngược lại để xanh.
+                // Đọc 5 mắt lửa
                 for (int i = 1; i <= 5; i++) {
                     Integer val = snapshot.child("sensors/flame/eye_" + i).getValue(Integer.class);
                     if (val != null && val == 1) {
@@ -113,44 +157,38 @@ public class DashboardFragment extends Fragment {
                     }
                 }
 
-                // Hướng cháy chỉ hiển thị dữ liệu hướng, không dùng để kết luận offline/online.
+                // Hướng cháy
                 String direction = snapshot.child("sensors/flame/direction").getValue(String.class);
                 tvDirection.setText("Hướng: " + (direction != null ? direction : "--"));
 
-                // Bơm và còi đang được lưu dưới dạng Boolean trong Firebase.
-                // true = ON, false = OFF.
+                // Bơm và còi
                 Boolean pump = snapshot.child("actuators/pump").getValue(Boolean.class);
                 Boolean buzzer = snapshot.child("actuators/buzzer").getValue(Boolean.class);
-
                 tvPump.setText("Bơm: " + boolToStatus(pump));
                 tvBuzzer.setText("Còi: " + boolToStatus(buzzer));
 
-                // Góc servo là số nguyên, nên đọc kiểu Integer.
+                // Góc servo
                 Integer servoX = snapshot.child("actuators/servo/axis_x").getValue(Integer.class);
                 Integer servoY = snapshot.child("actuators/servo/axis_y").getValue(Integer.class);
-
                 tvServoX.setText("Servo X: " + valueOrPlaceholder(servoX, "--") + "°");
                 tvServoY.setText("Servo Y: " + valueOrPlaceholder(servoY, "--") + "°");
 
-                // Cờ báo cháy dùng để hiện/ẩn banner cảnh báo.
+                // Cảnh báo cháy
                 Boolean fire = snapshot.child("system/fire_detected").getValue(Boolean.class);
                 bannerAlert.setVisibility(Boolean.TRUE.equals(fire) ? View.VISIBLE : View.GONE);
 
-                // Trạng thái online/offline được quyết định dựa trên last_seen.
-                // Lưu ý: last_seen phải cùng đơn vị với now bên dưới.
-                // Nếu Firebase lưu last_seen theo giây thì dùng System.currentTimeMillis()/1000.
-                // Nếu Firebase lưu theo mili-giây thì đổi now sang System.currentTimeMillis().
+                // Firmware version
+                String firmware = snapshot.child("system/firmware_version").getValue(String.class);
+                firmwareVersion = firmware != null ? firmware : "--";
+                tvFirmwareVersion.setText("FW: " + firmwareVersion);
+
+                // last_seen của ESP32: nguồn chính để xác định online/offline
                 Long lastSeen = snapshot.child("system/last_seen").getValue(Long.class);
                 if (lastSeen != null) {
-                    long now = System.currentTimeMillis() / 1000;
-                    boolean isOnline = now - lastSeen <= 15;
-                    tvStatus.setText(isOnline ? " Thiết bị: Online" : " Thiết bị: Offline");
-                    tvStatus.setTextColor(isOnline ? Color.parseColor("#4CAF50") : Color.parseColor("#F44336"));
-                } else {
-                    // Nếu chưa có last_seen thì không thể kết luận thiết bị online.
-                    tvStatus.setText(" Thiết bị: --");
-                    tvStatus.setTextColor(Color.GRAY);
+                    lastSeenTimestamp = lastSeen;
                 }
+
+                updateEsp32StatusUi();
             }
 
             @Override
@@ -160,16 +198,114 @@ public class DashboardFragment extends Fragment {
         });
     }
 
+    private void startEsp32StatusMonitor() {
+        // Theo dõi ESP32 mỗi 5 giây để báo Online/Offline chính xác hơn
+        if (statusRunnable != null) {
+            statusHandler.removeCallbacks(statusRunnable);
+        }
+
+        statusRunnable = new Runnable() {
+            @Override
+            public void run() {
+                updateEsp32StatusUi();
+                statusHandler.postDelayed(this, ESP32_CHECK_INTERVAL_MS);
+            }
+        };
+        statusHandler.post(statusRunnable);
+    }
+
+    private void stopEsp32StatusMonitor() {
+        if (statusRunnable != null) {
+            statusHandler.removeCallbacks(statusRunnable);
+            statusRunnable = null;
+        }
+    }
+
+    private void updateEsp32StatusUi() {
+        if (tvStatus == null || statusDot == null) {
+            return;
+        }
+
+        if (lastSeenTimestamp <= 0L) {
+            // Nếu chưa có last_seen hợp lệ thì coi như offline để tránh hiển thị xanh giả
+            tvStatus.setText(" Thiết bị: Offline");
+            tvStatus.setTextColor(Color.parseColor("#F44336"));
+            statusDot.setBackgroundResource(R.drawable.eye_status_red);
+            return;
+        }
+
+        long now = System.currentTimeMillis() / 1000;
+        long diff = now - lastSeenTimestamp;
+        boolean online = diff <= ESP32_OFFLINE_THRESHOLD_SECONDS;
+
+        if (online) {
+            tvStatus.setText(" Thiết bị: Online");
+            tvStatus.setTextColor(Color.parseColor("#4CAF50"));
+            statusDot.setBackgroundResource(R.drawable.eye_status_green);
+        } else {
+            tvStatus.setText(" Thiết bị: Offline");
+            tvStatus.setTextColor(Color.parseColor("#F44336"));
+            statusDot.setBackgroundResource(R.drawable.eye_status_red);
+        }
+    }
+
+    private void updateConnectivityBanner() {
+        if (bannerConnection == null || getContext() == null) {
+            return;
+        }
+
+        // Kiểm tra mạng điện thoại để biết app đang online hay đang dùng dữ liệu cache
+        ConnectivityManager cm = requireContext().getSystemService(ConnectivityManager.class);
+        NetworkInfo info = cm != null ? cm.getActiveNetworkInfo() : null;
+        boolean isOnline = info != null && info.isConnected();
+
+        bannerConnection.setVisibility(isOnline ? View.GONE : View.VISIBLE);
+    }
+
+    private void registerConnectivityReceiver() {
+        if (connectivityReceiver != null || getContext() == null) {
+            return;
+        }
+
+        // Lắng nghe thay đổi mạng để banner tự ẩn/hiện ngay khi điện thoại mất hoặc có internet
+        connectivityReceiver = new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                updateConnectivityBanner();
+            }
+        };
+
+        IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
+        requireContext().registerReceiver(connectivityReceiver, filter);
+    }
+
+    private void unregisterConnectivityReceiver() {
+        if (connectivityReceiver == null || getContext() == null) {
+            return;
+        }
+
+        try {
+            requireContext().unregisterReceiver(connectivityReceiver);
+        } catch (IllegalArgumentException ignored) {
+        }
+        connectivityReceiver = null;
+    }
+
     private String boolToStatus(Boolean value) {
         if (value == null) {
             return "--";
         }
-        // Chuyển Boolean trong Firebase thành trạng thái dễ đọc trên giao diện.
         return value ? "ON" : "OFF";
     }
 
     private String valueOrPlaceholder(Object value, String placeholder) {
-        // Trả về giá trị dạng chuỗi hoặc placeholder nếu dữ liệu chưa có.
         return value != null ? String.valueOf(value) : placeholder;
+    }
+
+    @Override
+    public void onDestroyView() {
+        super.onDestroyView();
+        stopEsp32StatusMonitor();
+        unregisterConnectivityReceiver();
     }
 }

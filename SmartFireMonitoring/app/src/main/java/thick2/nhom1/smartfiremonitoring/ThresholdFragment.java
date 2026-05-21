@@ -28,6 +28,12 @@ import java.util.Map;
  * sau đó đẩy các giá trị này lên Firebase để ESP32 cập nhật lại cấu hình hệ thống.
  */
 public class ThresholdFragment extends Fragment {
+    /**
+     * Fragment Cài đặt ngưỡng:
+     * - Cho phép người dùng chỉnh ngưỡng MQ-2 và nhiệt độ
+     * - Đẩy cấu hình mới lên Firebase
+     * - Đồng bộ giá trị hiện tại từ ESP32 về ô nhập liệu
+     */
 
     // Tham chiếu đến nhánh "thresholds" trên Firebase Realtime Database
     private DatabaseReference thresholdsRef;
@@ -54,6 +60,7 @@ public class ThresholdFragment extends Fragment {
     @Override
     public View onCreateView(LayoutInflater inflater, ViewGroup container,
                              Bundle savedInstanceState) {
+        // Inflate layout và ánh xạ các ô nhập/ngòi lưu cấu hình ngưỡng
         // Liên kết (inflate) với file giao diện XML
         View view = inflater.inflate(R.layout.fragment_threshold, container, false);
 
@@ -80,6 +87,7 @@ public class ThresholdFragment extends Fragment {
      * Hàm này sẽ tự động chạy mỗi khi dữ liệu trên bảng thresholds/ có bất kỳ thay đổi nào.
      */
     private void listenThresholds() {
+        // Lắng nghe realtime để UI luôn hiển thị ngưỡng đang chạy trên hệ thống
         thresholdListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
@@ -129,6 +137,7 @@ public class ThresholdFragment extends Fragment {
      * Hàm cấu hình sự kiện bấm cho nút "LƯU NGƯỠNG".
      */
     private void setupSaveButton() {
+        // Xử lý sự kiện bấm nút Lưu ngưỡng
         btnSaveThresholds.setOnClickListener(v -> {
             // Lấy chuỗi text mà người dùng nhập vào (trim() để xóa khoảng trắng thừa)
             String strMq2Safe = etMq2Safe.getText().toString().trim();
@@ -187,6 +196,7 @@ public class ThresholdFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        // Gỡ listener Firebase khi fragment bị huỷ để tránh leak
         // Hủy việc lắng nghe Firebase khi Fragment bị đóng để giải phóng bộ nhớ (tránh memory leak)
         if (thresholdsRef != null && thresholdListener != null) {
             thresholdsRef.removeEventListener(thresholdListener);

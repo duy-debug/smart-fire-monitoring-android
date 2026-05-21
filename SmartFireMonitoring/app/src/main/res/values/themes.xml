@@ -1,8 +1,23 @@
 <resources xmlns:tools="http://schemas.android.com/tools">
-    <!-- Base application theme. -->
     <style name="Base.Theme.SmartFireMonitoring" parent="Theme.Material3.DayNight.NoActionBar">
-        <!-- Customize your light theme here. -->
-        <!-- <item name="colorPrimary">@color/my_light_primary</item> -->
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorOnPrimary">@color/white</item>
+        <item name="colorPrimaryContainer">@color/chip_info_bg</item>
+        <item name="colorOnPrimaryContainer">@color/primary_dark</item>
+        <item name="colorSecondary">@color/safe_green</item>
+        <item name="colorOnSecondary">@color/white</item>
+        <item name="colorTertiary">@color/warning_yellow</item>
+        <item name="colorError">@color/danger_red</item>
+        <item name="colorSurface">@color/surface</item>
+        <item name="colorOnSurface">@color/text_primary</item>
+        <item name="colorSurfaceVariant">@color/surface_variant</item>
+        <item name="android:colorBackground">@color/background</item>
+        <item name="android:statusBarColor" tools:targetApi="l">@color/primary_dark</item>
+        <item name="android:navigationBarColor" tools:targetApi="l">@color/background</item>
+        <item name="materialCardViewStyle">@style/Widget.SmartFireMonitoring.Card</item>
+        <item name="textAppearanceHeadlineLarge">@style/TextAppearance.SmartFireMonitoring.Title</item>
+        <item name="textAppearanceBodyMedium">@style/TextAppearance.SmartFireMonitoring.Body</item>
+        <item name="textAppearanceLabelSmall">@style/TextAppearance.SmartFireMonitoring.Caption</item>
     </style>
 
     <style name="Theme.SmartFireMonitoring" parent="Base.Theme.SmartFireMonitoring" />
