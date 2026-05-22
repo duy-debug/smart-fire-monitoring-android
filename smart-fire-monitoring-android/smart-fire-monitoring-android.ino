@@ -100,7 +100,7 @@ const char* DHT_STATUS_STR[] = {"ok", "error"};
 //  ÁNH XẠ GÓC SERVO (theo cơ cấu thực tế)
 //  Trục X (Pan): 0° — 90° — 180°
 //    Flame 1=50°, Flame 2=70°, Flame 3=90°, Flame 4=120°, Flame 5=140°
-//  Trục Y (Tilt): dưới=150° → trên=30°
+//  Trục Y (Tilt): dưới=90° → trên=30°
 //    AO cao (lửa gần) → Tilt lớn (hạ vòi xuống gốc lửa)
 //    AO thấp (lửa xa) → Tilt nhỏ (ngẩng vòi, nước bay xa)
 // ─────────────────────────────────────────────────────────────
@@ -232,6 +232,7 @@ unsigned long lastWiFiRetry = 0;
 // Bình thường: 2000ms | Khi cháy: 500ms
 #define FB_WRITE_INTERVAL_NORMAL 2000
 #define FB_WRITE_INTERVAL_FIRE   500
+#define FB_CMD_READ_INTERVAL_MS  5000
 
 // ─────────────────────────────────────────────────────────────
 //  PHIÊN BẢN
@@ -379,6 +380,7 @@ void initFirebaseDefaults()
   json.set("control/buzzer_on", false);
   json.set("control/servo/axis_x", 90);
   json.set("control/servo/axis_y", 90);
+  json.set("system/last_seen", 0);
 
   esp_task_wdt_reset();
 
@@ -468,6 +470,7 @@ void startStream()
   {
     Firebase.RTDB.setStreamCallback(&fbStreamData, streamCallback, streamTimeoutCallback);
     streamStarted = true;
+    lastFBCmdRead = millis();
     Serial.println("[Stream] Đã bắt đầu lắng nghe node control/.");
   }
   else
@@ -770,80 +773,44 @@ int calcTiltAngle(int adcValue)
 }
 
 // ─────────────────────────────────────────────────────────────
-//  TRỤC Y QUÉT NÂNG HẠ TỰ ĐỘNG (50° ↔ 150°)
-//  Hạ 3s → dừng 1s → nâng 3s → dừng 1s → lặp lại
-//  Dùng tính toán theo thời gian (không phụ thuộc tốc độ loop)
+//  TRỤC Y QUÉT NÂNG HẠ TỰ ĐỘNG (90° ↔ 30°)
+//  Đi từng bước nhỏ 1° để servo mượt hơn khi loop bị Firebase làm chậm.
 // ─────────────────────────────────────────────────────────────
-#define TILT_SWEEP_MIN 100
-#define TILT_SWEEP_MAX 150
-#define TILT_MOVE_DURATION 3000  // 3s để di chuyển hết hành trình
-#define TILT_PAUSE_MS 1000      // Dừng 1s ở đỉnh và đáy
+#define TILT_SWEEP_MIN 30
+#define TILT_SWEEP_MAX 90
+#define TILT_STEP_DEGREES 1
+#define TILT_STEP_INTERVAL_MS 20
 
-enum TiltState { TILT_GOING_DOWN, TILT_PAUSE_BOTTOM, TILT_GOING_UP, TILT_PAUSE_TOP };
-TiltState tiltState = TILT_GOING_DOWN;
-unsigned long tiltMoveStart = 0;
+int tiltStep = -TILT_STEP_DEGREES;
+unsigned long lastTiltStep = 0;
 
 void sweepTilt()
 {
   unsigned long now = millis();
-  unsigned long elapsed = now - tiltMoveStart;
+  if (now - lastTiltStep < TILT_STEP_INTERVAL_MS)
+    return;
 
-  switch (tiltState)
+  lastTiltStep = now;
+  currentTilt += tiltStep;
+
+  if (currentTilt >= TILT_SWEEP_MAX)
   {
-    case TILT_GOING_DOWN: // Hạ: 50 → 150 trong 3s
-    {
-      if (elapsed >= TILT_MOVE_DURATION)
-      {
-        currentTilt = TILT_SWEEP_MAX;
-        tiltState = TILT_PAUSE_BOTTOM;
-        tiltMoveStart = now;
-      }
-      else
-      {
-        currentTilt = TILT_SWEEP_MIN + (int)((long)(TILT_SWEEP_MAX - TILT_SWEEP_MIN) * elapsed / TILT_MOVE_DURATION);
-      }
-      servoTilt.write(currentTilt);
-      break;
-    }
-
-    case TILT_PAUSE_BOTTOM: // Dừng 1s ở dưới (150°)
-      if (elapsed >= TILT_PAUSE_MS)
-      {
-        tiltState = TILT_GOING_UP;
-        tiltMoveStart = now;
-      }
-      break;
-
-    case TILT_GOING_UP: // Nâng: 150 → 50 trong 3s
-    {
-      if (elapsed >= TILT_MOVE_DURATION)
-      {
-        currentTilt = TILT_SWEEP_MIN;
-        tiltState = TILT_PAUSE_TOP;
-        tiltMoveStart = now;
-      }
-      else
-      {
-        currentTilt = TILT_SWEEP_MAX - (int)((long)(TILT_SWEEP_MAX - TILT_SWEEP_MIN) * elapsed / TILT_MOVE_DURATION);
-      }
-      servoTilt.write(currentTilt);
-      break;
-    }
-
-    case TILT_PAUSE_TOP: // Dừng 1s ở trên (50°)
-      if (elapsed >= TILT_PAUSE_MS)
-      {
-        tiltState = TILT_GOING_DOWN;
-        tiltMoveStart = now;
-      }
-      break;
+    currentTilt = TILT_SWEEP_MAX;
+    tiltStep = -TILT_STEP_DEGREES;
   }
+  else if (currentTilt <= TILT_SWEEP_MIN)
+  {
+    currentTilt = TILT_SWEEP_MIN;
+    tiltStep = TILT_STEP_DEGREES;
+  }
+
+  servoTilt.write(currentTilt);
 }
 
 void resetTiltSweep()
 {
-  tiltState = TILT_GOING_DOWN;
-  tiltMoveStart = millis();
+  tiltStep = -TILT_STEP_DEGREES;
+  lastTiltStep = millis();
   currentTilt = 90;
   servoTilt.write(currentTilt);
 }
@@ -862,7 +829,7 @@ void updateServosAuto(int priorityIdx)
     Serial.printf("[Servo AUTO] Pan=%d° (mắt #%d)\n", currentPan, priorityIdx + 1);
   }
 
-  // Trục Y: quét nâng hạ tự động 50°↔150°
+  // Trục Y: quét nâng hạ tự động 90°↔30°
   sweepTilt();
 }
 
@@ -997,7 +964,6 @@ void writeFirebaseData()
   // System
   batchJson.set("system/fire_detected", fireDetected);
   batchJson.set("system/mode", SYSTEM_MODE_STR[systemMode]);
-  batchJson.set("system/wifi_connected", wifiConnected);
   batchJson.set("system/firmware_version", FIRMWARE_VERSION);
   batchJson.set("system/sensor_fusion_alert", sensorFusionAlert);
 
@@ -1019,14 +985,25 @@ void sendHeartbeat()
 {
   if (millis() - lastHeartbeat < 5000)
     return;
-  lastHeartbeat = millis();
   if (!isFirebaseReady())
     return;
   if (!checkNTPSynced())
+  {
+    lastHeartbeat = millis();
+    Serial.println("[Heartbeat] Bỏ qua last_seen vì NTP chưa đồng bộ.");
     return;
+  }
 
   time_t now = getTimestamp();
-  Firebase.RTDB.setInt(&fbData, FB_ROOT "/system/last_seen", (int)now);
+  if (Firebase.RTDB.setInt(&fbData, FB_ROOT "/system/last_seen", (int)now))
+  {
+    lastHeartbeat = millis();
+  }
+  else
+  {
+    Serial.printf("[Heartbeat] Lỗi ghi last_seen: %s\n",
+                  fbData.errorReason().c_str());
+  }
 }
 
 void logFireEvent(const char *action)
@@ -1177,7 +1154,7 @@ void checkSnooze()
  */
 void handleFirebaseCommands()
 {
-  if (millis() - lastFBCmdRead < 1000)
+  if (millis() - lastFBCmdRead < FB_CMD_READ_INTERVAL_MS)
     return;
   lastFBCmdRead = millis();
   if (!isFirebaseReady())
@@ -1251,6 +1228,7 @@ void handleAutoMode()
     if (!fireDetected)
     {
       fireDetected = true;
+      systemMode = MODE_AUTO;
       fireTriggerTime = millis();
       waitingForServo = true;
       sensorDataDirty = true;
@@ -1262,10 +1240,9 @@ void handleAutoMode()
       setBuzzer(true);
 
       // Khởi tạo sweep tilt
-      tiltState = TILT_GOING_DOWN;
-      tiltMoveStart = millis();
-      currentTilt = TILT_SWEEP_MIN;  // Bắt đầu từ 100°
-      servoTilt.write(currentTilt);
+      lastTiltStep = millis();
+      currentTilt = constrain(currentTilt, TILT_SWEEP_MIN, TILT_SWEEP_MAX);
+      tiltStep = (currentTilt <= TILT_SWEEP_MIN) ? TILT_STEP_DEGREES : -TILT_STEP_DEGREES;
 
       // Nếu có lửa → điều servo theo hướng lửa
       // Nếu chỉ sensor fusion → giữ servo trung tâm
@@ -1422,11 +1399,7 @@ void loop()
   checkSensorFusion();
 
   // ── 3. Logic điều khiển — LUÔN CHẠY (local) ──────────────
-  if (systemMode == MODE_AUTO)
-  {
-    handleAutoMode(); // Chữa cháy tự động — hoạt động offline
-  }
-  // Chế độ manual: chỉ hoạt động khi có WiFi (qua Stream callback)
+  handleAutoMode(); // Manual chỉ áp dụng khi an toàn; có cháy thì ép AUTO để cảnh báo/chữa cháy.
 
   // ── 4. Giao tiếp Firebase — CHỈ KHI CÓ WIFI ─────────────
   if (wifiConnected)
