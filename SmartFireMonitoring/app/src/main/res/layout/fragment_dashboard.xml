@@ -40,48 +40,6 @@
                 android:textStyle="bold" />
         </LinearLayout>
 
-        <LinearLayout
-            android:id="@+id/bannerAlert"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginBottom="16dp"
-            android:background="@color/chip_danger_bg"
-            android:gravity="center_vertical"
-            android:orientation="horizontal"
-            android:paddingHorizontal="14dp"
-            android:paddingVertical="12dp"
-            android:visibility="gone">
-
-            <View
-                android:layout_width="4dp"
-                android:layout_height="match_parent"
-                android:layout_marginEnd="12dp"
-                android:background="@color/danger_red" />
-
-            <LinearLayout
-                android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:orientation="vertical">
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:text="CẢNH BÁO CHÁY"
-                    android:textColor="@color/danger_red"
-                    android:textSize="@dimen/body_text_size"
-                    android:textStyle="bold" />
-
-                <TextView
-                    android:layout_width="wrap_content"
-                    android:layout_height="wrap_content"
-                    android:layout_marginTop="2dp"
-                    android:text="Hệ thống phát hiện nguy cơ cháy, vui lòng kiểm tra ngay."
-                    android:textColor="@color/danger_red"
-                    android:textSize="@dimen/caption_text_size" />
-            </LinearLayout>
-        </LinearLayout>
-
         <com.google.android.material.card.MaterialCardView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
@@ -537,3 +495,4 @@
 
     </LinearLayout>
 </ScrollView>
+

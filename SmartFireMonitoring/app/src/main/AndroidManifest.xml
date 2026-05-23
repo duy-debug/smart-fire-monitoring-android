@@ -27,6 +27,12 @@
             </intent-filter>
         </activity>
 
+        <activity
+            android:name=".FireAlertActivity"
+            android:exported="false"
+            android:launchMode="singleTop"
+            android:theme="@style/Theme.SmartFireMonitoring.FireAlert" />
+
         <service
             android:name=".FireAlarmService"
             android:exported="false"

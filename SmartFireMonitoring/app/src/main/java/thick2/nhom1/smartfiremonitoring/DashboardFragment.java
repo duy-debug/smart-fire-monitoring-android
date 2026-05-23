@@ -56,7 +56,6 @@ public class DashboardFragment extends Fragment {
     private View statusDot;
 
     private View bannerConnection;
-    private View bannerAlert;
     private final View[] flameEyes = new View[5];
     private CardView mq2Card;
 
@@ -98,7 +97,6 @@ public class DashboardFragment extends Fragment {
         statusDot = view.findViewById(R.id.viewStatusDot);
 
         bannerConnection = view.findViewById(R.id.bannerConnection);
-        bannerAlert = view.findViewById(R.id.bannerAlert);
         mq2Card = view.findViewById(R.id.mq2Card);
 
         flameEyes[0] = view.findViewById(R.id.eye1);
@@ -184,10 +182,6 @@ public class DashboardFragment extends Fragment {
                 Integer servoY = snapshot.child("actuators/servo/axis_y").getValue(Integer.class);
                 tvServoX.setText("Servo X: " + valueOrPlaceholder(servoX, "--") + "°");
                 tvServoY.setText("Servo Y: " + valueOrPlaceholder(servoY, "--") + "°");
-
-                // Cảnh báo cháy
-                Boolean fire = snapshot.child("system/fire_detected").getValue(Boolean.class);
-                bannerAlert.setVisibility(Boolean.TRUE.equals(fire) ? View.VISIBLE : View.GONE);
 
                 // Firmware version
                 String firmware = snapshot.child("system/firmware_version").getValue(String.class);
