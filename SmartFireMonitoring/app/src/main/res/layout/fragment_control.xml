@@ -182,7 +182,7 @@
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
                     android:layout_marginTop="4dp"
-                    android:text="Góc xoay được giới hạn từ 0° đến 180°"
+                    android:text="Servo X: 0° - 180°, Servo Y: 30° - 90°"
                     android:textColor="#64748B"
                     android:textSize="12sp" />
 
@@ -257,7 +257,7 @@
                             android:background="#E2E8F0"
                             android:paddingHorizontal="10dp"
                             android:paddingVertical="4dp"
-                            android:text="0 - 180"
+                            android:text="30 - 90"
                             android:textColor="#475569"
                             android:textSize="11sp"
                             android:textStyle="bold" />
@@ -267,8 +267,8 @@
                         android:id="@+id/seekBarServoY"
                         android:layout_width="match_parent"
                         android:layout_height="wrap_content"
-                        android:max="180"
-                        android:progress="90"
+                        android:max="60"
+                        android:progress="60"
                         android:splitTrack="false" />
                 </LinearLayout>
             </LinearLayout>

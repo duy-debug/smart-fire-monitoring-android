@@ -165,7 +165,7 @@ public class HistoryFragment extends Fragment {
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 ArrayList<FireEvent> ascendingEvents = new ArrayList<>();
                 for (DataSnapshot child : snapshot.getChildren()) {
-                    FireEvent event = child.getValue(FireEvent.class);
+                    FireEvent event = parseFireEvent(child);
                     if (event != null) {
                         ascendingEvents.add(event);
                     }
@@ -196,17 +196,74 @@ public class HistoryFragment extends Fragment {
         logsQuery.addValueEventListener(logsListener);
     }
 
+    private FireEvent parseFireEvent(DataSnapshot child) {
+        if (child == null || !child.exists()) {
+            return null;
+        }
+
+        FireEvent event = new FireEvent();
+
+        Long timestamp = child.child("timestamp").getValue(Long.class);
+        if (timestamp == null) {
+            Integer timestampInt = child.child("timestamp").getValue(Integer.class);
+            event.timestamp = timestampInt != null ? timestampInt.longValue() : 0L;
+        } else {
+            event.timestamp = timestamp;
+        }
+
+        event.time_readable = child.child("time_readable").getValue(String.class);
+
+        Double temp = child.child("temperature").getValue(Double.class);
+        if (temp == null) {
+            Float tempFloat = child.child("temperature").getValue(Float.class);
+            event.temperature = tempFloat != null ? tempFloat.doubleValue() : 0d;
+        } else {
+            event.temperature = temp;
+        }
+
+        Double humidity = child.child("humidity").getValue(Double.class);
+        if (humidity == null) {
+            Float humidityFloat = child.child("humidity").getValue(Float.class);
+            event.humidity = humidityFloat != null ? humidityFloat.doubleValue() : 0d;
+        } else {
+            event.humidity = humidity;
+        }
+
+        Integer mq2Value = child.child("mq2_value").getValue(Integer.class);
+        if (mq2Value == null) {
+            Long mq2Long = child.child("mq2_value").getValue(Long.class);
+            event.mq2_value = mq2Long != null ? mq2Long.intValue() : 0;
+        } else {
+            event.mq2_value = mq2Value;
+        }
+
+        event.mq2_level = child.child("mq2_level").getValue(String.class);
+        event.flame_direction = child.child("flame_direction").getValue(String.class);
+        event.flame_pattern = child.child("flame_pattern").getValue(String.class);
+        event.action_taken = child.child("action_taken").getValue(String.class);
+
+        Long resolvedAt = child.child("resolved_at").getValue(Long.class);
+        if (resolvedAt == null) {
+            Integer resolvedAtInt = child.child("resolved_at").getValue(Integer.class);
+            event.resolved_at = resolvedAtInt != null ? resolvedAtInt.longValue() : 0L;
+        } else {
+            event.resolved_at = resolvedAt;
+        }
+
+        return event;
+    }
+
     private void listenThresholds() {
         // Lấy ngưỡng cảnh báo hiện tại để kẻ line giới hạn trên biểu đồ
         thresholdsListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
-                Float temp = snapshot.child("temp_warning").getValue(Float.class);
-                Integer mq2 = snapshot.child("mq2_warning").getValue(Integer.class);
+        Double temp = snapshot.child("temp_warning").getValue(Double.class);
+        Integer mq2 = snapshot.child("mq2_warning").getValue(Integer.class);
 
-                if (temp != null) {
-                    tempWarning = temp;
-                }
+        if (temp != null) {
+            tempWarning = temp.floatValue();
+        }
                 if (mq2 != null) {
                     mq2Warning = mq2;
                 }
@@ -235,7 +292,7 @@ public class HistoryFragment extends Fragment {
 
         for (int i = 0; i < ascendingEvents.size(); i++) {
             FireEvent event = ascendingEvents.get(i);
-            tempEntries.add(new Entry(i, event.getTemperature()));
+            tempEntries.add(new Entry(i, (float) event.getTemperature()));
             mq2Entries.add(new Entry(i, event.getMq2Value()));
             labels.add(event.getChartTimeLabel());
         }

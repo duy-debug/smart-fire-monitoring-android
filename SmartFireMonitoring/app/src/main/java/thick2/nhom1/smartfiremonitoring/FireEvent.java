@@ -8,8 +8,8 @@ import java.util.Locale;
 public class FireEvent {
     public long timestamp;
     public String time_readable;
-    public float temperature;
-    public float humidity;
+    public double temperature;
+    public double humidity;
     public int mq2_value;
     public String mq2_level;
     public String flame_direction;
@@ -24,7 +24,7 @@ public class FireEvent {
         return timestamp;
     }
 
-    public float getTemperature() {
+    public double getTemperature() {
         return temperature;
     }
 

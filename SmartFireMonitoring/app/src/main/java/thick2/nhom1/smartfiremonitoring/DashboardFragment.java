@@ -34,8 +34,9 @@ import com.google.firebase.database.ValueEventListener;
  */
 public class DashboardFragment extends Fragment {
 
-    private static final long ESP32_OFFLINE_THRESHOLD_SECONDS = 10L;
+    private static final long ESP32_OFFLINE_THRESHOLD_SECONDS = 20L;
     private static final long ESP32_CHECK_INTERVAL_MS = 5000L;
+    private static final int HEARTBEAT_MISS_CONFIRMATION_COUNT = 3;
 
     private DatabaseReference databaseRef;
 
@@ -50,6 +51,8 @@ public class DashboardFragment extends Fragment {
     private TextView tvServoY;
     private TextView tvStatus;
     private TextView tvFirmwareVersion;
+    private TextView tvEsp32Power;
+    private TextView tvHeartbeatStatus;
     private View statusDot;
 
     private View bannerConnection;
@@ -60,9 +63,13 @@ public class DashboardFragment extends Fragment {
     private BroadcastReceiver connectivityReceiver;
     private final Handler statusHandler = new Handler(Looper.getMainLooper());
     private Runnable statusRunnable;
+    private ValueEventListener firebaseListener;
 
     private long lastSeenTimestamp = 0L;
     private String firmwareVersion = "--";
+    private boolean wifiConnectedStable = false;
+    private int wifiMissCount = 0;
+    private int heartbeatMissCount = 0;
 
     public DashboardFragment() {
     }
@@ -86,6 +93,8 @@ public class DashboardFragment extends Fragment {
         tvServoY = view.findViewById(R.id.tvServoY);
         tvStatus = view.findViewById(R.id.tvStatus);
         tvFirmwareVersion = view.findViewById(R.id.tvFirmwareVersion);
+        tvEsp32Power = view.findViewById(R.id.tvEsp32Power);
+        tvHeartbeatStatus = view.findViewById(R.id.tvHeartbeatStatus);
         statusDot = view.findViewById(R.id.viewStatusDot);
 
         bannerConnection = view.findViewById(R.id.bannerConnection);
@@ -121,7 +130,7 @@ public class DashboardFragment extends Fragment {
 
     private void listenFirebase() {
         // Nghe toàn bộ node gốc để UI tự cập nhật khi Firebase có dữ liệu mới hoặc dữ liệu cache
-        databaseRef.addValueEventListener(new ValueEventListener() {
+        firebaseListener = new ValueEventListener() {
             @Override
             public void onDataChange(@NonNull DataSnapshot snapshot) {
                 // Đọc nhiệt độ và độ ẩm từ DHT11
@@ -145,6 +154,9 @@ public class DashboardFragment extends Fragment {
                     mq2Card.setCardBackgroundColor(Color.parseColor("#FFC107"));
                 } else if ("danger".equals(level)) {
                     mq2Card.setCardBackgroundColor(Color.parseColor("#F44336"));
+                } else {
+                    // Reset về màu trung tính nếu dữ liệu chưa có hoặc firmware trả trạng thái lạ
+                    mq2Card.setCardBackgroundColor(Color.parseColor("#E5E7EB"));
                 }
 
                 // Đọc 5 mắt lửa
@@ -182,12 +194,17 @@ public class DashboardFragment extends Fragment {
                 firmwareVersion = firmware != null ? firmware : "--";
                 tvFirmwareVersion.setText("FW: " + firmwareVersion);
 
+                // Trạng thái WiFi nội bộ của ESP32
+                Boolean wifi = snapshot.child("system/wifi_connected").getValue(Boolean.class);
+                updateWifiStableState(Boolean.TRUE.equals(wifi));
+
                 // last_seen của ESP32: nguồn chính để xác định online/offline
                 Long lastSeen = snapshot.child("system/last_seen").getValue(Long.class);
                 if (lastSeen != null) {
                     lastSeenTimestamp = lastSeen;
                 }
 
+                updateDeviceStatusUi();
                 updateEsp32StatusUi();
             }
 
@@ -195,7 +212,9 @@ public class DashboardFragment extends Fragment {
             public void onCancelled(@NonNull DatabaseError error) {
                 Toast.makeText(getContext(), "Mất kết nối Firebase", Toast.LENGTH_SHORT).show();
             }
-        });
+        };
+
+        databaseRef.addValueEventListener(firebaseListener);
     }
 
     private void startEsp32StatusMonitor() {
@@ -227,25 +246,62 @@ public class DashboardFragment extends Fragment {
         }
 
         if (lastSeenTimestamp <= 0L) {
-            // Nếu chưa có last_seen hợp lệ thì coi như offline để tránh hiển thị xanh giả
-            tvStatus.setText(" Thiết bị: Offline");
-            tvStatus.setTextColor(Color.parseColor("#F44336"));
-            statusDot.setBackgroundResource(R.drawable.eye_status_red);
+            heartbeatMissCount = 0;
+            tvStatus.setText("Heartbeat Firebase: Chưa có dữ liệu");
+            tvStatus.setTextColor(Color.parseColor("#64748B"));
+            statusDot.setBackgroundResource(R.drawable.eye_status_yellow);
+            if (tvHeartbeatStatus != null) {
+                tvHeartbeatStatus.setText("Heartbeat Firebase: --");
+            }
             return;
         }
 
         long now = System.currentTimeMillis() / 1000;
-        long diff = now - lastSeenTimestamp;
-        boolean online = diff <= ESP32_OFFLINE_THRESHOLD_SECONDS;
+        long diff = Math.max(0L, now - lastSeenTimestamp);
+        boolean heartbeatFresh = diff <= ESP32_OFFLINE_THRESHOLD_SECONDS;
+        if (tvHeartbeatStatus != null) {
+            tvHeartbeatStatus.setText("Heartbeat Firebase: " + diff + "s ago");
+        }
 
-        if (online) {
-            tvStatus.setText(" Thiết bị: Online");
+        if (heartbeatFresh) {
+            heartbeatMissCount = 0;
+            tvStatus.setText("Heartbeat Firebase: Online (" + diff + "s)");
             tvStatus.setTextColor(Color.parseColor("#4CAF50"));
             statusDot.setBackgroundResource(R.drawable.eye_status_green);
         } else {
-            tvStatus.setText(" Thiết bị: Offline");
-            tvStatus.setTextColor(Color.parseColor("#F44336"));
-            statusDot.setBackgroundResource(R.drawable.eye_status_red);
+            heartbeatMissCount++;
+            if (heartbeatMissCount < HEARTBEAT_MISS_CONFIRMATION_COUNT) {
+                tvStatus.setText("Heartbeat Firebase: Chậm (" + heartbeatMissCount + "/" + HEARTBEAT_MISS_CONFIRMATION_COUNT + ")");
+                tvStatus.setTextColor(Color.parseColor("#F59E0B"));
+                statusDot.setBackgroundResource(R.drawable.eye_status_yellow);
+            } else {
+                tvStatus.setText("Heartbeat Firebase: Offline (" + diff + "s)");
+                tvStatus.setTextColor(Color.parseColor("#F44336"));
+                statusDot.setBackgroundResource(R.drawable.eye_status_red);
+            }
+        }
+    }
+
+    private void updateDeviceStatusUi() {
+        if (tvEsp32Power != null) {
+            boolean esp32Running = lastSeenTimestamp > 0L
+                    || (firmwareVersion != null && !"--".equals(firmwareVersion))
+                    || wifiConnectedStable;
+            tvEsp32Power.setText(esp32Running ? "ESP32: Đang chạy" : "ESP32: Chưa có dữ liệu");
+            tvEsp32Power.setTextColor(Color.parseColor(esp32Running ? "#0F172A" : "#64748B"));
+        }
+    }
+
+    private void updateWifiStableState(boolean wifiConnectedNow) {
+        if (wifiConnectedNow) {
+            wifiMissCount = 0;
+            wifiConnectedStable = true;
+            return;
+        }
+
+        wifiMissCount++;
+        if (wifiMissCount >= 3) {
+            wifiConnectedStable = false;
         }
     }
 
@@ -305,6 +361,10 @@ public class DashboardFragment extends Fragment {
     @Override
     public void onDestroyView() {
         super.onDestroyView();
+        if (databaseRef != null && firebaseListener != null) {
+            databaseRef.removeEventListener(firebaseListener);
+            firebaseListener = null;
+        }
         stopEsp32StatusMonitor();
         unregisterConnectivityReceiver();
     }

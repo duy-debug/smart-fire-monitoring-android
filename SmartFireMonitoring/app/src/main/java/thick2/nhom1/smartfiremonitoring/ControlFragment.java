@@ -21,6 +21,10 @@ import com.google.firebase.database.FirebaseDatabase;
 import com.google.firebase.database.ValueEventListener;
 
 public class ControlFragment extends Fragment {
+    private static final int SERVO_Y_MIN = 30;
+    private static final int SERVO_Y_MAX = 90;
+    private static final int SERVO_Y_RANGE = SERVO_Y_MAX - SERVO_Y_MIN;
+
     /**
      * Fragment Điều khiển:
      * - Chuyển AUTO/MANUAL
@@ -111,7 +115,8 @@ public class ControlFragment extends Fragment {
         isUpdatingUi = false;
 
         seekBarServoX.setProgress(90);
-        seekBarServoY.setProgress(90);
+        seekBarServoY.setMax(SERVO_Y_RANGE);
+        seekBarServoY.setProgress(servoYToProgress(90));
         tvServoXValue.setText("Servo X (Pan): 90°");
         tvServoYValue.setText("Servo Y (Tilt): 90°");
 
@@ -159,18 +164,20 @@ public class ControlFragment extends Fragment {
             }
         });
 
+        seekBarServoY.setMax(SERVO_Y_RANGE);
         seekBarServoY.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
             @Override
             public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
-                tvServoYValue.setText("Servo Y (Tilt): " + progress + "°");
+                int angle = progressToServoY(progress);
+                tvServoYValue.setText("Servo Y (Tilt): " + angle + "°");
 
                 if (!fromUser || isUpdatingUi || fireDetected || !switchMode.isChecked()) {
                     return;
                 }
 
-                controlRef.child("servo").child("axis_y").setValue(progress)
+                controlRef.child("servo").child("axis_y").setValue(angle)
                         .addOnSuccessListener(unused -> Toast.makeText(getContext(),
-                                "Servo Y = " + progress + "°",
+                                "Servo Y = " + angle + "°",
                                 Toast.LENGTH_SHORT).show())
                         .addOnFailureListener(e -> Toast.makeText(getContext(),
                                 "Không ghi được Servo Y: " + e.getMessage(),
@@ -339,8 +346,8 @@ public class ControlFragment extends Fragment {
                 Integer v = snapshot.getValue(Integer.class);
                 if (v != null) {
                     if (!isUpdatingUi) {
-                        seekBarServoY.setProgress(v);
-                        tvServoYValue.setText("Servo Y (Tilt): " + v + "°");
+                        seekBarServoY.setProgress(servoYToProgress(v));
+                        tvServoYValue.setText("Servo Y (Tilt): " + clampServoY(v) + "°");
                     }
                 }
             }
@@ -440,7 +447,7 @@ public class ControlFragment extends Fragment {
 
                 // Nếu chuyển sang AUTO và hệ thống không đang cháy,
                 // đặt lại lệnh `control` về mặc định an toàn để ESP32 đọc được.
-                if ("auto".equalsIgnoreCase(mode) && !fireDetected) {
+        if ("auto".equalsIgnoreCase(mode) && !fireDetected) {
                 controlRef.child("buzzer_on").setValue(false);
                 controlRef.child("pump_on").setValue(false);
                 controlRef.child("servo").child("axis_x").setValue(90);
@@ -476,7 +483,7 @@ public class ControlFragment extends Fragment {
 
         setControlsEnabled(manualMode);
         tvServoXValue.setText("Servo X (Pan): " + seekBarServoX.getProgress() + "°");
-        tvServoYValue.setText("Servo Y (Tilt): " + seekBarServoY.getProgress() + "°");
+        tvServoYValue.setText("Servo Y (Tilt): " + progressToServoY(seekBarServoY.getProgress()) + "°");
 
         fireLockBanner.setVisibility(View.GONE);
         if (manualMode) {
@@ -496,6 +503,24 @@ public class ControlFragment extends Fragment {
         seekBarServoY.setEnabled(enabled);
         btnPump.setEnabled(enabled);
         btnBuzzer.setEnabled(enabled);
+    }
+
+    private int progressToServoY(int progress) {
+        return clampServoY(SERVO_Y_MIN + progress);
+    }
+
+    private int servoYToProgress(int angle) {
+        return clampServoY(angle) - SERVO_Y_MIN;
+    }
+
+    private int clampServoY(int angle) {
+        if (angle < SERVO_Y_MIN) {
+            return SERVO_Y_MIN;
+        }
+        if (angle > SERVO_Y_MAX) {
+            return SERVO_Y_MAX;
+        }
+        return angle;
     }
 
     /**

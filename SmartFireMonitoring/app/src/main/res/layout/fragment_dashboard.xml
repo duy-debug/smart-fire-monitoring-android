@@ -179,6 +179,25 @@
                         android:textColor="@color/text_secondary"
                         android:textSize="@dimen/caption_text_size" />
                 </LinearLayout>
+
+                <TextView
+                    android:id="@+id/tvEsp32Power"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="10dp"
+                    android:text="ESP32: --"
+                    android:textColor="#0F172A"
+                    android:textSize="13sp"
+                    android:textStyle="bold" />
+
+                <TextView
+                    android:id="@+id/tvHeartbeatStatus"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:layout_marginTop="6dp"
+                    android:text="Heartbeat Firebase: --"
+                    android:textColor="#334155"
+                    android:textSize="13sp" />
             </LinearLayout>
         </com.google.android.material.card.MaterialCardView>
 
