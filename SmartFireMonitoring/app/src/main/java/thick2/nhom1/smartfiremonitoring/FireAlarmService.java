@@ -143,10 +143,12 @@ public class FireAlarmService extends Service {
                     fireAlertShown = false;
                     closeFireAlertOverlay();
                     stopRepeatingNotification();
+                    cancelFireNotification();
                 } else {
                     Log.d(TAG, "onDataChange() - Hết cháy -> Chờ 5 giây rồi đóng overlay!");
                     cancelOverlayReopen();
                     stopRepeatingNotification();
+                    cancelFireNotification();
                     scheduleOverlayClose();
                 }
 
@@ -201,6 +203,16 @@ public class FireAlarmService extends Service {
             repeatingHandler.removeCallbacks(repeatingRunnable);
             repeatingRunnable = null;
             Log.d(TAG, "Đã dừng lặp thông báo báo động.");
+        }
+    }
+
+    /**
+     * Hủy notification cảnh báo cháy đang hiển thị để âm thanh heads-up không còn kéo dài sau khi hết cháy.
+     */
+    private void cancelFireNotification() {
+        NotificationManager notificationManager = (NotificationManager) getSystemService(Context.NOTIFICATION_SERVICE);
+        if (notificationManager != null) {
+            notificationManager.cancel(1);
         }
     }
 
