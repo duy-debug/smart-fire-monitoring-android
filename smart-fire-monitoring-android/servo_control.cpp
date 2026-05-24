@@ -9,10 +9,12 @@ void setupServos()
     servoPan.attach(SERVO_PAN_PIN, 500, 2400);
     servoTilt.attach(SERVO_TILT_PIN, 500, 2400);
     servoPan.write(90);
-    servoTilt.write(90);
+    servoTilt.write(TILT_SWEEP_MIN);
     currentPan = 90;
-    currentTilt = 90;
-    Serial.println("[Servo] Khởi động về trung tâm (Pan=90°, Tilt=90°).");
+    currentTilt = TILT_SWEEP_MIN;
+    lastTiltStep = millis();
+    tiltStep = TILT_STEP_DEGREES;
+    Serial.println("[Servo] Khởi động về trung tâm (Pan=90°, Tilt=30°).");
 }
 
 int calcTiltAngle(int adcValue)

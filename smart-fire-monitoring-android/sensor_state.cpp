@@ -37,7 +37,7 @@ SystemMode systemMode = MODE_AUTO;
 bool pumpActive = false;
 bool buzzerActive = false;
 int currentPan = 90;
-int currentTilt = 90;
+int currentTilt = TILT_SWEEP_MIN;
 bool waitingForServo = false;
 unsigned long fireTriggerTime = 0;
 char currentLogKey[64] = "";
@@ -78,5 +78,5 @@ unsigned long lastFBCmdRead = 0;
 unsigned long lastHeartbeat = 0;
 unsigned long lastWiFiRetry = 0;
 
-int tiltStep = -TILT_STEP_DEGREES;
+int tiltStep = TILT_STEP_DEGREES;
 unsigned long lastTiltStep = 0;

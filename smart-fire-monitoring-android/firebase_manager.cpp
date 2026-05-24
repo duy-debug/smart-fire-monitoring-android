@@ -77,7 +77,6 @@ void initFirebaseDefaults()
         return;
 
     FirebaseJson json;
-    json.set("thresholds/updated", false);
     json.set("control/pump_on", false);
     json.set("control/buzzer_on", false);
     json.set("control/servo/axis_x", 90);
