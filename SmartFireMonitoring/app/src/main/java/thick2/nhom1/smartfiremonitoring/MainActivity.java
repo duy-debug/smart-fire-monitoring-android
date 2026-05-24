@@ -38,67 +38,43 @@ public class MainActivity extends AppCompatActivity {
             }
         }
         
-        // Khởi động Service dưới dạng Foreground Service để liên tục giám sát
+        // Bật offline persistence trước khi bất kỳ FirebaseDatabase instance nào được chạm tới
+        FirebaseHelper.enableOfflineMode();
+
+        bottomNav = findViewById(R.id.bottomNav);
+
+        // Khởi động service sớm để luôn sẵn sàng nghe trạng thái cháy.
+        // Service sẽ tự chờ FirebaseAuth xong rồi mới đăng ký listener.
         Intent serviceIntent = new Intent(this, FireAlarmService.class);
         ContextCompat.startForegroundService(this, serviceIntent);
 
-        // Bật offline persistence
-        FirebaseHelper.enableOfflineMode();
-
-        // Đăng nhập ẩn danh Firebase
         FirebaseAuth.getInstance()
                 .signInAnonymously()
                 .addOnSuccessListener(result -> {
-
                     Log.d("FIREBASE_AUTH", "Login success");
 
-                    Toast.makeText(
-                            this,
-                            "Firebase Connected",
-                            Toast.LENGTH_SHORT
-                    ).show();
+                    Toast.makeText(this, "Firebase Connected", Toast.LENGTH_SHORT).show();
 
-                    // TODO:
-                    // bắt đầu đọc dữ liệu Firebase ở đây
-
+                    loadFragment(new DashboardFragment());
+                    bottomNav.setOnItemSelectedListener(item -> {
+                        if (item.getItemId() == R.id.nav_dashboard) {
+                            loadFragment(new DashboardFragment());
+                        } else if (item.getItemId() == R.id.nav_history) {
+                            loadFragment(new HistoryFragment());
+                        } else if (item.getItemId() == R.id.nav_threshold) {
+                            loadFragment(new ThresholdFragment());
+                        } else if (item.getItemId() == R.id.nav_alert) {
+                            loadFragment(new NotificationFragment());
+                        } else if (item.getItemId() == R.id.nav_control) {
+                            loadFragment(new ControlFragment());
+                        }
+                        return true;
+                    });
                 })
                 .addOnFailureListener(e -> {
-
-                    Log.e(
-                            "FIREBASE_AUTH",
-                            e.getMessage()
-                    );
-
-                    Toast.makeText(
-                            this,
-                            "Login Failed",
-                            Toast.LENGTH_SHORT
-                    ).show();
+                    Log.e("FIREBASE_AUTH", e.getMessage());
+                    Toast.makeText(this, "Login Failed", Toast.LENGTH_SHORT).show();
                 });
-        bottomNav = findViewById(R.id.bottomNav);
-        // Mặc định
-        loadFragment(new DashboardFragment());
-
-        bottomNav.setOnItemSelectedListener(item -> {
-
-            if (item.getItemId() == R.id.nav_dashboard) {
-                loadFragment(new DashboardFragment());
-
-            } else if (item.getItemId() == R.id.nav_history) {
-                loadFragment(new HistoryFragment());
-
-            } else if (item.getItemId() == R.id.nav_threshold) {
-                loadFragment(new ThresholdFragment());
-
-            } else if (item.getItemId() == R.id.nav_alert) {
-                loadFragment(new NotificationFragment());
-
-            } else if (item.getItemId() == R.id.nav_control) {
-                loadFragment(new ControlFragment());
-            }
-
-            return true;
-        });
 
         ViewCompat.setOnApplyWindowInsetsListener(findViewById(R.id.main), (v, insets) -> {
             Insets systemBars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
