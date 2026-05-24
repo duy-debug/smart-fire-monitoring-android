@@ -536,8 +536,8 @@ void handleFirebaseCycle()
         checkNTPSynced();
     }
 
-    // Ghi dữ liệu lên Firebase
-    writeFirebaseData();      // Batch (2s bình thường / 500ms khi cháy)
+    // Đọc mode/ngưỡng trước để state ghi lên Firebase không bị lùi 1 nhịp
     handleFirebaseCommands(); // Đồng bộ ngưỡng + mode (1s/lần)
+    writeFirebaseData();      // Batch (2s bình thường / 500ms khi cháy)
     sendHeartbeat();          // Cập nhật last_seen (5s/lần)
 }

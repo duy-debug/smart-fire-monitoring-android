@@ -24,6 +24,7 @@ public class ControlFragment extends Fragment {
     private static final int SERVO_Y_MIN = 30;
     private static final int SERVO_Y_MAX = 90;
     private static final int SERVO_Y_RANGE = SERVO_Y_MAX - SERVO_Y_MIN;
+    private static final int SERVO_Y_AUTO_DEFAULT = 45;
 
     /**
      * Fragment Điều khiển:
@@ -64,6 +65,9 @@ public class ControlFragment extends Fragment {
     private boolean pumpActual = false;
     private boolean buzzerActualAvailable = false;
     private boolean buzzerActual = false;
+    private String pendingMode = null;
+    private long pendingModeAt = 0L;
+    private static final long MODE_CONFIRM_WINDOW_MS = 1500L;
 
     public ControlFragment() {
     }
@@ -82,7 +86,7 @@ public class ControlFragment extends Fragment {
         actuatorsRef = rootRef.child("actuators");
 
         bindViews(view);
-        setDefaultModeToAuto();
+        setDefaultUiState();
 
         setupModeSwitch();
         setupSeekBars();
@@ -90,8 +94,7 @@ public class ControlFragment extends Fragment {
         listenControlState();
         listenActuatorsState();
         listenFireDetected();
-
-        syncUiFromCurrentMode(false);
+        loadInitialModeState();
         return view;
     }
 
@@ -108,19 +111,36 @@ public class ControlFragment extends Fragment {
         tvAutoLock = view.findViewById(R.id.tvAutoLock);
     }
 
-    private void setDefaultModeToAuto() {
-        // Khi mở màn hình điều khiển thì UI mặc định ở chế độ AUTO an toàn
+    private void setDefaultUiState() {
+        // Khởi tạo UI mặc định, không ghi đè mode lên Firebase
         isUpdatingUi = true;
         switchMode.setChecked(false);
         isUpdatingUi = false;
 
         seekBarServoX.setProgress(90);
         seekBarServoY.setMax(SERVO_Y_RANGE);
-        seekBarServoY.setProgress(servoYToProgress(90));
+        seekBarServoY.setProgress(servoYToProgress(SERVO_Y_AUTO_DEFAULT));
         tvServoXValue.setText("Servo X (Pan): 90°");
-        tvServoYValue.setText("Servo Y (Tilt): 90°");
+        tvServoYValue.setText("Servo Y (Tilt): 45°");
+    }
 
-        writeMode("auto");
+    private void loadInitialModeState() {
+        systemRef.child("mode").get().addOnSuccessListener(snapshot -> {
+            if (fireDetected) {
+                return;
+            }
+
+            String mode = snapshot.getValue(String.class);
+            boolean manualMode = "manual".equalsIgnoreCase(mode);
+            isUpdatingUi = true;
+            switchMode.setChecked(manualMode);
+            isUpdatingUi = false;
+            syncUiFromCurrentMode(manualMode);
+        }).addOnFailureListener(e -> {
+            if (!fireDetected) {
+                syncUiFromCurrentMode(false);
+            }
+        });
     }
 
     private void setupModeSwitch() {
@@ -130,6 +150,8 @@ public class ControlFragment extends Fragment {
                 return;
             }
 
+            pendingMode = isChecked ? "manual" : "auto";
+            pendingModeAt = System.currentTimeMillis();
             writeMode(isChecked ? "manual" : "auto");
             syncUiFromCurrentMode(isChecked);
         });
@@ -268,10 +290,15 @@ public class ControlFragment extends Fragment {
                     return;
                 }
 
+                if (shouldIgnoreRemoteMode(mode)) {
+                    return;
+                }
+
                 boolean manualMode = "manual".equalsIgnoreCase(mode);
                 isUpdatingUi = true;
                 switchMode.setChecked(manualMode);
                 isUpdatingUi = false;
+                pendingMode = null;
                 syncUiFromCurrentMode(manualMode);
             }
 
@@ -346,8 +373,13 @@ public class ControlFragment extends Fragment {
                 Integer v = snapshot.getValue(Integer.class);
                 if (v != null) {
                     if (!isUpdatingUi) {
-                        seekBarServoY.setProgress(servoYToProgress(v));
-                        tvServoYValue.setText("Servo Y (Tilt): " + clampServoY(v) + "°");
+                        if (switchMode.isChecked()) {
+                            seekBarServoY.setProgress(servoYToProgress(v));
+                            tvServoYValue.setText("Servo Y (Tilt): " + clampServoY(v) + "°");
+                        } else {
+                            seekBarServoY.setProgress(servoYToProgress(SERVO_Y_AUTO_DEFAULT));
+                            tvServoYValue.setText("Servo Y (Tilt): " + SERVO_Y_AUTO_DEFAULT + "°");
+                        }
                     }
                 }
             }
@@ -451,7 +483,7 @@ public class ControlFragment extends Fragment {
                 controlRef.child("buzzer_on").setValue(false);
                 controlRef.child("pump_on").setValue(false);
                 controlRef.child("servo").child("axis_x").setValue(90);
-                controlRef.child("servo").child("axis_y").setValue(90);
+                controlRef.child("servo").child("axis_y").setValue(SERVO_Y_AUTO_DEFAULT);
                 }
             })
                 .addOnFailureListener(e -> Toast.makeText(getContext(),
@@ -463,6 +495,7 @@ public class ControlFragment extends Fragment {
         isUpdatingUi = true;
         switchMode.setChecked(false);
         isUpdatingUi = false;
+        pendingMode = null;
         writeMode("auto");
     }
 
@@ -483,7 +516,12 @@ public class ControlFragment extends Fragment {
 
         setControlsEnabled(manualMode);
         tvServoXValue.setText("Servo X (Pan): " + seekBarServoX.getProgress() + "°");
-        tvServoYValue.setText("Servo Y (Tilt): " + progressToServoY(seekBarServoY.getProgress()) + "°");
+        if (manualMode) {
+            tvServoYValue.setText("Servo Y (Tilt): " + progressToServoY(seekBarServoY.getProgress()) + "°");
+        } else {
+            seekBarServoY.setProgress(servoYToProgress(SERVO_Y_AUTO_DEFAULT));
+            tvServoYValue.setText("Servo Y (Tilt): " + SERVO_Y_AUTO_DEFAULT + "°");
+        }
 
         fireLockBanner.setVisibility(View.GONE);
         if (manualMode) {
@@ -495,6 +533,19 @@ public class ControlFragment extends Fragment {
 
         updatePumpButton();
         updateBuzzerButton();
+    }
+
+    private boolean shouldIgnoreRemoteMode(String mode) {
+        if (pendingMode == null || mode == null) {
+            return false;
+        }
+
+        if (System.currentTimeMillis() - pendingModeAt > MODE_CONFIRM_WINDOW_MS) {
+            pendingMode = null;
+            return false;
+        }
+
+        return !pendingMode.equalsIgnoreCase(mode);
     }
 
     private void setControlsEnabled(boolean enabled) {

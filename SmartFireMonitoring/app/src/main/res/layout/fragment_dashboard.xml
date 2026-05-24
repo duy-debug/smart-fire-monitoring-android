@@ -135,7 +135,8 @@
                         android:gravity="end"
                         android:text="FW: --"
                         android:textColor="@color/text_secondary"
-                        android:textSize="@dimen/caption_text_size" />
+                        android:textSize="@dimen/caption_text_size"
+                        android:visibility="gone" />
                 </LinearLayout>
 
                 <TextView

@@ -241,7 +241,7 @@
                             android:id="@+id/tvServoYValue"
                             android:layout_width="wrap_content"
                             android:layout_height="wrap_content"
-                            android:text="Servo Y (Tilt): 90°"
+                            android:text="Servo Y (Tilt): 45°"
                             android:textColor="#0F172A"
                             android:textSize="14sp"
                             android:textStyle="bold" />
