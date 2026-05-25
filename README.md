@@ -28,7 +28,7 @@ Project gồm 2 phần chính:
     <td align="center"><img src="image/history-list.png" alt="History List" width="190"></td>
     <td align="center"><img src="image/history-chart.png" alt="History Chart" width="190"></td>
     <td align="center"><img src="image/nguong.png" alt="Ngưỡng" width="190"></td>
-    <td align="center"><img src="image/notify.png" alt="Thông báo" width="190"></td>
+
   </tr>
 </table>
 
@@ -37,6 +37,7 @@ Project gồm 2 phần chính:
 <table>
   <tr>
     <td align="center"><img src="image/warning.png" alt="Warning 1" width="190"></td>
+        <td align="center"><img src="image/notify.png" alt="Thông báo" width="190"></td>
   </tr>
 </table>
 

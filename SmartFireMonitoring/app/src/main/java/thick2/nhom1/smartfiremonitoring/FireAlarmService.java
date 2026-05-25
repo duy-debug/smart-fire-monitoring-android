@@ -11,7 +11,6 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.Color;
 import android.media.AudioAttributes;
-import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Handler;
@@ -36,7 +35,8 @@ import java.util.List;
 public class FireAlarmService extends Service {
 
     private static final String TAG = "FireAlarmService";
-    private static final String FIRE_CHANNEL_ID = "fire_alarm_channel_v2";
+    private static final String FIRE_CHANNEL_SOUND_ID = "fire_alarm_channel_v2_sound";
+    private static final String FIRE_CHANNEL_SILENT_ID = "fire_alarm_channel_v2_silent";
     private static final String FOREGROUND_CHANNEL_ID = "fire_monitor_foreground_channel";
     private static final int FIRE_NOTIFICATION_ID = 1;
     private static final int FOREGROUND_NOTIFICATION_ID = 999;
@@ -78,7 +78,6 @@ public class FireAlarmService extends Service {
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "Service created");
-
         ensureNotificationChannels();
         startForegroundServiceNotification();
 
@@ -117,17 +116,13 @@ public class FireAlarmService extends Service {
     private void setupAuthListener() {
         authStateListener = firebaseAuth -> {
             if (firebaseAuth.getCurrentUser() != null) {
-                Log.d(TAG, "FirebaseAuth ready - listening for fire events");
                 if (!isListening) {
                     listenForFire();
                     isListening = true;
                 }
-            } else {
-                Log.d(TAG, "FirebaseAuth not ready or signed out");
-                if (isListening && rootRef != null && fireListener != null) {
-                    rootRef.removeEventListener(fireListener);
-                    isListening = false;
-                }
+            } else if (isListening && rootRef != null && fireListener != null) {
+                rootRef.removeEventListener(fireListener);
+                isListening = false;
             }
         };
         FirebaseAuth.getInstance().addAuthStateListener(authStateListener);
@@ -165,7 +160,6 @@ public class FireAlarmService extends Service {
                 currentSnoozedActive = snoozeActive;
 
                 boolean appInForeground = isAppInForeground();
-
                 if (isFireDetected && currentAlertEnabled && !currentSnoozedActive) {
                     cancelOverlayClose();
                     cancelOverlayReopen();
@@ -363,10 +357,8 @@ public class FireAlarmService extends Service {
             return;
         }
 
-        Uri defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM);
-        if (defaultSoundUri == null) {
-            defaultSoundUri = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION);
-        }
+        Uri fireSoundUri = getFireSoundUri();
+        String channelId = allowFullScreen ? FIRE_CHANNEL_SILENT_ID : FIRE_CHANNEL_SOUND_ID;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             AudioAttributes audioAttributes = new AudioAttributes.Builder()
@@ -375,8 +367,8 @@ public class FireAlarmService extends Service {
                     .build();
 
             NotificationChannel channel = new NotificationChannel(
-                    FIRE_CHANNEL_ID,
-                    "Cảnh báo cháy",
+                    channelId,
+                    allowFullScreen ? "Cảnh báo cháy (im lặng)" : "Cảnh báo cháy",
                     NotificationManager.IMPORTANCE_HIGH
             );
             channel.setDescription("Kênh thông báo khẩn cấp khi phát hiện cháy");
@@ -384,7 +376,11 @@ public class FireAlarmService extends Service {
             channel.setLightColor(Color.RED);
             channel.enableVibration(true);
             channel.setVibrationPattern(new long[]{0, 1000, 500, 1000, 500, 1000});
-            channel.setSound(defaultSoundUri, audioAttributes);
+            if (!allowFullScreen) {
+                channel.setSound(fireSoundUri, audioAttributes);
+            } else {
+                channel.setSound(null, null);
+            }
             notificationManager.createNotificationChannel(channel);
         }
 
@@ -397,15 +393,18 @@ public class FireAlarmService extends Service {
                 PendingIntent.FLAG_UPDATE_CURRENT | PendingIntent.FLAG_IMMUTABLE
         );
 
-        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, FIRE_CHANNEL_ID)
+        NotificationCompat.Builder builder = new NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(title)
                 .setContentText(body)
                 .setAutoCancel(true)
-                .setSound(defaultSoundUri)
                 .setPriority(NotificationCompat.PRIORITY_HIGH)
                 .setVibrate(new long[]{0, 1000, 500, 1000, 500, 1000})
                 .setContentIntent(contentIntent);
+
+        if (!allowFullScreen) {
+            builder.setSound(fireSoundUri);
+        }
 
         if (allowFullScreen) {
             Intent alertIntent = new Intent(this, FireAlertActivity.class);
@@ -472,23 +471,37 @@ public class FireAlarmService extends Service {
             return;
         }
 
+        Uri fireSoundUri = getFireSoundUri();
         AudioAttributes audioAttributes = new AudioAttributes.Builder()
                 .setUsage(AudioAttributes.USAGE_ALARM)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build();
 
-        NotificationChannel fireChannel = new NotificationChannel(
-                FIRE_CHANNEL_ID,
+        NotificationChannel soundChannel = new NotificationChannel(
+                FIRE_CHANNEL_SOUND_ID,
                 "Cảnh báo cháy",
                 NotificationManager.IMPORTANCE_HIGH
         );
-        fireChannel.setDescription("Kênh thông báo khẩn cấp khi phát hiện cháy");
-        fireChannel.enableLights(true);
-        fireChannel.setLightColor(Color.RED);
-        fireChannel.enableVibration(true);
-        fireChannel.setVibrationPattern(new long[]{0, 1000, 500, 1000, 500, 1000});
-        fireChannel.setSound(RingtoneManager.getDefaultUri(RingtoneManager.TYPE_ALARM), audioAttributes);
-        notificationManager.createNotificationChannel(fireChannel);
+        soundChannel.setDescription("Kênh thông báo khẩn cấp khi phát hiện cháy");
+        soundChannel.enableLights(true);
+        soundChannel.setLightColor(Color.RED);
+        soundChannel.enableVibration(true);
+        soundChannel.setVibrationPattern(new long[]{0, 1000, 500, 1000, 500, 1000});
+        soundChannel.setSound(fireSoundUri, audioAttributes);
+        notificationManager.createNotificationChannel(soundChannel);
+
+        NotificationChannel silentChannel = new NotificationChannel(
+                FIRE_CHANNEL_SILENT_ID,
+                "Cảnh báo cháy (im lặng)",
+                NotificationManager.IMPORTANCE_HIGH
+        );
+        silentChannel.setDescription("Kênh hiển thị dialog khi ứng dụng đang mở");
+        silentChannel.enableLights(true);
+        silentChannel.setLightColor(Color.RED);
+        silentChannel.enableVibration(true);
+        silentChannel.setVibrationPattern(new long[]{0, 1000, 500, 1000, 500, 1000});
+        silentChannel.setSound(null, null);
+        notificationManager.createNotificationChannel(silentChannel);
 
         NotificationChannel foregroundChannel = new NotificationChannel(
                 FOREGROUND_CHANNEL_ID,
@@ -497,6 +510,10 @@ public class FireAlarmService extends Service {
         );
         foregroundChannel.setDescription("Dịch vụ nền để liên tục giám sát trạng thái cháy");
         notificationManager.createNotificationChannel(foregroundChannel);
+    }
+
+    private Uri getFireSoundUri() {
+        return Uri.parse("android.resource://" + getPackageName() + "/" + R.raw.tieng_coi_bao_chay);
     }
 
     private boolean isAppInForeground() {
