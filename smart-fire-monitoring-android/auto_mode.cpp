@@ -10,19 +10,27 @@
 #include "servo_control.h"
 #include "firebase_manager.h"
 
+static bool anyFlameEyeActive()
+{
+    for (int i = 0; i < 5; i++)
+    {
+        if (flameDetected[i])
+            return true;
+    }
+
+    return false;
+}
+
 void handleAutoMode()
 {
-    // Tối ưu #7: Sensor fusion — kết hợp lửa + nhiệt + khí gas
-    // Kích hoạt khi: có lửa HOẶC (nhiệt cao + khí gas nguy hiểm)
+    bool flameEyeActive = anyFlameEyeActive();
     bool shouldActivate = anyFlameDetected || sensorFusionAlert;
 
-    // alert/enabled=false hoặc snoozed=true → tắt toàn bộ (còi + bơm + servo + notification)
     if (!alertEnabled || alertSnoozed)
     {
         shouldActivate = false;
     }
 
-    // ── CÓ NGUY CƠ CHÁY ──────────────────────────────────────
     if (shouldActivate)
     {
         if (!fireDetected)
@@ -33,19 +41,12 @@ void handleAutoMode()
             waitingForServo = true;
             sensorDataDirty = true;
 
-            Serial.println("\n[AUTO] PHÁT HIỆN CHÁY! Đang kích hoạt...");
+            Serial.println("\n[AUTO] Fire detected. Activating.");
             if (sensorFusionAlert && !anyFlameDetected)
-                Serial.println("[AUTO] Kích hoạt bởi SENSOR FUSION (nhiệt + khí gas).");
+                Serial.println("[AUTO] Triggered by sensor fusion.");
 
             setBuzzer(true);
 
-            // Khởi tạo sweep tilt
-            lastTiltStep = millis();
-            currentTilt = constrain(currentTilt, TILT_SWEEP_MIN, TILT_SWEEP_MAX);
-            tiltStep = (currentTilt <= TILT_SWEEP_MIN) ? TILT_STEP_DEGREES : -TILT_STEP_DEGREES;
-
-            // Nếu có lửa → điều servo theo hướng lửa
-            // Nếu chỉ sensor fusion → giữ servo trung tâm
             if (anyFlameDetected && flamePriorityIdx >= 0)
                 updateServosAuto(flamePriorityIdx);
             else
@@ -65,12 +66,11 @@ void handleAutoMode()
             }
         }
 
-        // Bật bơm sau 500ms — chờ servo ổn định
         if (waitingForServo && millis() - fireTriggerTime >= 500)
         {
             waitingForServo = false;
             setPump(true);
-            Serial.println("[AUTO] Servo ổn định → Bơm BẬT.");
+            Serial.println("[AUTO] Servo settled. Pump ON.");
 
             if (isFirebaseReady())
             {
@@ -78,28 +78,23 @@ void handleAutoMode()
                 Firebase.RTDB.setBool(&fbData, FB_ROOT "/actuators/auto_pump_active", true);
             }
         }
+        else if (waitingForServo && !flameEyeActive)
+        {
+            stopTiltSweep(90);
+        }
 
-        // Cập nhật hướng servo liên tục nếu lửa di chuyển
-        // Trục X: bám theo hướng lửa | Trục Y: quét nâng hạ liên tục
         if (!waitingForServo)
         {
-            if (anyFlameDetected && flamePriorityIdx >= 0)
+            if (flameEyeActive && anyFlameDetected && flamePriorityIdx >= 0)
             {
-                // Cập nhật Pan theo hướng lửa mới
-                int newPan = PAN_ANGLES[flamePriorityIdx];
-                if (newPan != currentPan)
-                {
-                    currentPan = newPan;
-                    servoPan.write(currentPan);
-                    Serial.printf("[Servo AUTO] Pan=%d° (mắt #%d)\n", currentPan, flamePriorityIdx + 1);
-                }
+                updateServosAuto(flamePriorityIdx);
             }
-            // Trục Y luôn quét nâng hạ khi đang cháy
-            sweepTilt();
+            else
+            {
+                stopTiltSweep(90);
+            }
         }
     }
-
-    // ── NGUY CƠ ĐÃ HẾT ────────────────────────────────────────
     else
     {
         if (fireDetected)
@@ -108,17 +103,13 @@ void handleAutoMode()
             waitingForServo = false;
             sensorDataDirty = true;
 
-            Serial.println("[AUTO] Nguy cơ đã hết — Reset hệ thống.\n");
+            Serial.println("[AUTO] Fire cleared. Resetting system.");
 
             setPump(false);
-            delay(200); // Chờ dòng ổn định
+            delay(200);
             setBuzzer(false);
             delay(200);
-            // Reset servo về trung tâm
-            currentPan = 90;
-            servoPan.write(currentPan);
-            delay(200);
-            resetTiltSweep();
+            updateServosManual(90, 90);
             resolveLogEvent();
 
             if (isFirebaseReady())

@@ -9,6 +9,8 @@ void setupServos();
 int calcTiltAngle(int adcValue);
 void sweepTilt();
 void resetTiltSweep();
+void startTiltSweep();
+void stopTiltSweep(int resetAngle);
 void updateServosAuto(int priorityIdx);
 void updateServosManual(int pan, int tilt);
 
