@@ -6,6 +6,7 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.graphics.drawable.GradientDrawable;
+import android.media.MediaPlayer;
 import android.os.Build;
 import android.os.Bundle;
 import android.view.View;
@@ -33,6 +34,7 @@ public class FireAlertActivity extends AppCompatActivity {
     private TextView titleText;
     private ValueAnimator flashAnimator;
     private GradientDrawable pulseCircleDrawable;
+    private MediaPlayer alarmPlayer;
 
     @Override
     protected void onCreate(@Nullable Bundle savedInstanceState) {
@@ -63,8 +65,36 @@ public class FireAlertActivity extends AppCompatActivity {
         tvTime.setText("Phát hiện lúc: " + formatNow());
         btnClose.setOnClickListener(v -> dismissByUser());
 
+        startAlarmSound();
         startFlashAnimation();
         registerCloseReceiver();
+    }
+
+    private void startAlarmSound() {
+        stopAlarmSound();
+        alarmPlayer = MediaPlayer.create(this, R.raw.tieng_coi_bao_chay);
+        if (alarmPlayer == null) {
+            return;
+        }
+
+        alarmPlayer.setLooping(true);
+        alarmPlayer.setVolume(1f, 1f);
+        alarmPlayer.start();
+    }
+
+    private void stopAlarmSound() {
+        if (alarmPlayer == null) {
+            return;
+        }
+
+        try {
+            if (alarmPlayer.isPlaying()) {
+                alarmPlayer.stop();
+            }
+        } catch (IllegalStateException ignored) {
+        }
+        alarmPlayer.release();
+        alarmPlayer = null;
     }
 
     private void startFlashAnimation() {
@@ -120,6 +150,7 @@ public class FireAlertActivity extends AppCompatActivity {
     @Override
     protected void onDestroy() {
         super.onDestroy();
+        stopAlarmSound();
         stopFlashAnimation();
         if (closeReceiver != null) {
             try {
