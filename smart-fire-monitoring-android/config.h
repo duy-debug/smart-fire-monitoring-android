@@ -27,7 +27,7 @@ const bool FLAME_AO_ENABLED[5] = {true, false, true, false, true};
 
 // ─────────────────────────────────────────────────────────────
 //  CẤU HÌNH LOGIC CẢM BIẾN LỬA
-//  DO: LOW = có lửa (active-LOW)
+//  DO: HIGHT = có lửa (active-HIGH)
 //  AO: giá trị CAO = lửa mạnh (dùng để xác định hướng khi >1 mắt báo)
 // ─────────────────────────────────────────────────────────────
 
@@ -78,6 +78,7 @@ inline const char *DHT_STATUS_STR[] = {"ok", "error"};
 // ─────────────────────────────────────────────────────────────
 const int PAN_ANGLES[5] = {50, 70, 90, 120, 140};
 
+#define TILT_HOME_ANGLE 45
 #define TILT_MIN 30
 #define TILT_MAX 150
 #define ADC_NEAR 0

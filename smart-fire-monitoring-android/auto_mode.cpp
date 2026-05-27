@@ -11,6 +11,7 @@
 #include "firebase_manager.h"
 
 static unsigned long flameClearedFusionHoldStart = 0;
+static bool suppressFusionAfterFlameClear = false;
 
 static void clearFireStateImmediate()
 {
@@ -36,8 +37,8 @@ static void clearFireStateImmediate()
     }
 
     // 3) Return servos home asynchronously.
-    stopTiltSweep(90);
-    updateServosManual(90, 90);
+    stopTiltSweep(TILT_HOME_ANGLE);
+    updateServosManual(90, TILT_HOME_ANGLE);
 
     resolveLogEvent();
 }
@@ -48,37 +49,21 @@ void handleAutoMode()
     // tránh giữ còi/pump do độ trễ cập nhật của cảm biến fusion.
     if (fireDetected && !anyFlameDetected)
     {
-        setBuzzer(false);
-        if (!sensorFusionAlert)
-        {
-            flameClearedFusionHoldStart = 0;
-            Serial.println("[AUTO] All clear. Full reset.");
-            clearFireStateImmediate();
-            return;
-        }
-        else
-        {
-            unsigned long now = millis();
-            if (flameClearedFusionHoldStart == 0)
-            {
-                flameClearedFusionHoldStart = now;
-                Serial.println("[AUTO] Flame cleared, fusion still active. Buzzer OFF, keep pump/servo.");
-            }
-            else if (now - flameClearedFusionHoldStart >= FUSION_HOLD_AFTER_FLAME_CLEAR_MS)
-            {
-                Serial.println("[AUTO] Fusion hold timeout after flame clear. Forcing full reset.");
-                flameClearedFusionHoldStart = 0;
-                clearFireStateImmediate();
-                return;
-            }
-        }
+        suppressFusionAfterFlameClear = sensorFusionAlert;
+        flameClearedFusionHoldStart = 0;
+        Serial.println("[AUTO] Flame cleared. Full reset immediately.");
+        clearFireStateImmediate();
+        return;
     }
-    else
+
+    if (anyFlameDetected || !sensorFusionAlert)
     {
+        suppressFusionAfterFlameClear = false;
         flameClearedFusionHoldStart = 0;
     }
 
-    bool shouldActivate = anyFlameDetected || sensorFusionAlert;
+    bool shouldActivate = anyFlameDetected ||
+                          (sensorFusionAlert && !suppressFusionAfterFlameClear);
 
     if (!alertEnabled || alertSnoozed)
     {
@@ -104,7 +89,7 @@ void handleAutoMode()
             if (anyFlameDetected && flamePriorityIdx >= 0)
                 updateServosAuto(flamePriorityIdx);
             else
-                updateServosManual(90, 90);
+                updateServosManual(90, TILT_HOME_ANGLE);
 
             if (isFirebaseReady())
             {
@@ -139,7 +124,7 @@ void handleAutoMode()
         }
         else
         {
-            stopTiltSweep(90);
+            stopTiltSweep(TILT_HOME_ANGLE);
         }
     }
     else if (fireDetected)

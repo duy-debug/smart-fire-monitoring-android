@@ -80,7 +80,7 @@ void initFirebaseDefaults()
     json.set("control/pump_on", false);
     json.set("control/buzzer_on", false);
     json.set("control/servo/axis_x", 90);
-    json.set("control/servo/axis_y", 90);
+    json.set("control/servo/axis_y", TILT_HOME_ANGLE);
     json.set("system/last_seen", 0);
 
     esp_task_wdt_reset();
