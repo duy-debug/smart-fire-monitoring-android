@@ -8,35 +8,33 @@ void setupFlamePins()
 {
     for (int i = 0; i < 5; i++)
     {
-        // Active-HIGH: mặc định LOW = không lửa
+        // Active-HIGH: default LOW = no flame
         pinMode(FLAME_DO_PINS[i], INPUT_PULLDOWN);
     }
 }
 
 void readFlameSensors()
 {
-    if (millis() - lastFlameRead < 100)
+    if (millis() - lastFlameRead < FLAME_READ_INTERVAL_MS)
         return;
     lastFlameRead = millis();
 
-    // Bỏ qua 5 giây đầu sau boot — cảm biến cần ổn định
+    // Skip the first 5 seconds after boot so sensors can stabilize.
     if (millis() < 5000)
         return;
 
     bool rawAny = false;
-    int minRaw = 0; // Tìm AO cao nhất (lửa mạnh nhất)
+    int minRaw = -1;
     int minIdx = -1;
 
     for (int i = 0; i < 5; i++)
     {
-        // Đọc DO: module này HIGH = có lửa, LOW = không lửa (active-HIGH)
         bool doState = digitalRead(FLAME_DO_PINS[i]);
         flameDetected[i] = (doState == HIGH);
 
         flameRaw[i] = FLAME_AO_ENABLED[i] ? analogRead(FLAME_AO_PINS[i]) : 0;
     }
 
-    // Đếm số mắt DO báo lửa
     int fireCount = 0;
     int singleIdx = -1;
     for (int i = 0; i < 5; i++)
@@ -48,9 +46,6 @@ void readFlameSensors()
         }
     }
 
-    // Xác định hướng lửa:
-    //   1 mắt → dùng DO trực tiếp
-    //   >1 mắt → xét AO (chỉ mắt có DO=0) để chọn mắt có tín hiệu mạnh nhất
     if (fireCount == 1)
     {
         rawAny = true;
@@ -60,33 +55,37 @@ void readFlameSensors()
     else if (fireCount > 1)
     {
         rawAny = true;
-        // Tìm mắt có AO cao nhất trong số mắt DO=0 VÀ AO enabled
+        int activeIdxSum = 0;
+        bool hasAoCandidate = false;
+
         for (int i = 0; i < 5; i++)
         {
-            if (flameDetected[i] && FLAME_AO_ENABLED[i])
+            if (!flameDetected[i])
+                continue;
+
+            activeIdxSum += i;
+
+            if (FLAME_AO_ENABLED[i])
             {
-                if (flameRaw[i] > minRaw)
+                if (!hasAoCandidate || flameRaw[i] > minRaw)
                 {
+                    hasAoCandidate = true;
                     minRaw = flameRaw[i];
                     minIdx = i;
                 }
             }
         }
-        // Nếu không có mắt AO nào enabled trong số DO=0, lấy mắt DO đầu tiên
-        if (minIdx < 0)
+
+        if (!hasAoCandidate)
         {
-            for (int i = 0; i < 5; i++)
-            {
-                if (flameDetected[i])
-                {
-                    minIdx = i;
-                    break;
-                }
-            }
+            // Khi nhiều mắt lửa cùng ON nhưng không có AO khả dụng,
+            // lấy trung bình vị trí để pan bám hướng lửa mượt hơn.
+            int avgIdx = (activeIdxSum + (fireCount / 2)) / fireCount;
+            minIdx = constrain(avgIdx, 0, 4);
+            minRaw = flameRaw[minIdx];
         }
     }
 
-    // Debug: in trạng thái 5 mắt mỗi 2 giây
     static unsigned long lastFlameDebug = 0;
     if (millis() - lastFlameDebug >= 2000)
     {
@@ -100,56 +99,43 @@ void readFlameSensors()
 
     unsigned long now = millis();
 
-    if (rawAny)
-    {
-        confirmOffCount = 0;
-        if (now - lastConfirmRead >= CONFIRM_INTERVAL_MS)
-        {
-            confirmOnCount++;
-            lastConfirmRead = now;
-            if (confirmOnCount > CONFIRM_ON_THRESHOLD * 2)
-                confirmOnCount = CONFIRM_ON_THRESHOLD;
-        }
-    }
-    else
-    {
-        confirmOnCount = 0;
-        if (now - lastConfirmRead >= CONFIRM_INTERVAL_MS)
-        {
-            confirmOffCount++;
-            lastConfirmRead = now;
-            if (confirmOffCount > CONFIRM_OFF_THRESHOLD * 2)
-                confirmOffCount = CONFIRM_OFF_THRESHOLD;
-        }
-    }
-
-    if (confirmOnCount >= CONFIRM_ON_THRESHOLD && !anyFlameDetected)
+    if (rawAny && !anyFlameDetected)
     {
         anyFlameDetected = true;
+        confirmOnCount = CONFIRM_ON_THRESHOLD;
+        confirmOffCount = 0;
+        lastConfirmRead = now;
         flamePriorityIdx = minIdx;
         flameDirection = (minIdx >= 0) ? (FlameDir)minIdx : DIR_NONE;
-        Serial.printf("[Flame] ✓ CÓ lửa! Hướng: %s (mắt #%d, ADC=%d)\n",
+        Serial.printf("[Flame] \xE2\x9C\x93 Fire detected! Direction: %s (eye #%d, ADC=%d)\n",
                       FLAME_DIR_STR[flameDirection], minIdx + 1, minRaw);
     }
-    else if (confirmOffCount >= CONFIRM_OFF_THRESHOLD && anyFlameDetected)
+    else if (!rawAny && anyFlameDetected)
     {
         anyFlameDetected = false;
+        confirmOnCount = 0;
+        confirmOffCount = CONFIRM_OFF_THRESHOLD;
+        lastConfirmRead = now;
         flamePriorityIdx = -1;
         flameDirection = DIR_NONE;
-        Serial.println("[Flame] ✓ Lửa đã TẮT.");
+        Serial.println("[Flame] \xE2\x9C\x93 Fire cleared.");
     }
-    else if (anyFlameDetected && minIdx >= 0)
+    else if (anyFlameDetected)
     {
-        flamePriorityIdx = minIdx;
-        flameDirection = (FlameDir)minIdx;
+        if (minIdx >= 0)
+        {
+            flamePriorityIdx = minIdx;
+            flameDirection = (FlameDir)minIdx;
+            Serial.printf("[Flame] Direction updated -> %s (eye #%d)\n",
+                          FLAME_DIR_STR[flameDirection], minIdx + 1);
+        }
     }
 }
 
 /*
- * Tối ưu #7: Sensor Fusion
- * Kết hợp nhiệt độ + khí gas để phát hiện nguy cơ cháy
- * ngay cả khi cảm biến lửa chưa kích hoạt.
- * Điều kiện: nhiệt độ >= tempWarning VÀ MQ2 >= mq2Warning
+ * Sensor fusion: temperature + gas can trigger fire alert
+ * even before flame sensors are active.
+ * Condition: temperature >= tempWarning and MQ2 >= mq2Warning
  */
 void checkSensorFusion()
 {
@@ -158,10 +144,10 @@ void checkSensorFusion()
 
     if (sensorFusionAlert && !prevFusion)
     {
-        Serial.println("[Fusion] CẢNH BÁO: Nhiệt độ CAO + Khí gas NGUY HIỂM!");
+        Serial.println("[Fusion] WARNING: High temperature + dangerous gas!");
     }
     else if (!sensorFusionAlert && prevFusion)
     {
-        Serial.println("[Fusion] Mức nguy hiểm đã giảm.");
+        Serial.println("[Fusion] Danger level dropped.");
     }
 }

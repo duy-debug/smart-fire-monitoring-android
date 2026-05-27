@@ -97,6 +97,7 @@ const int PAN_ANGLES[5] = {50, 70, 90, 120, 140};
 #define CONFIRM_ON_THRESHOLD 1
 #define CONFIRM_OFF_THRESHOLD 3
 #define CONFIRM_INTERVAL_MS 100
+#define FLAME_READ_INTERVAL_MS 20
 
 // ─────────────────────────────────────────────────────────────
 //  KẾT NỐI / FIREBASE
@@ -106,6 +107,7 @@ const int PAN_ANGLES[5] = {50, 70, 90, 120, 140};
 #define FB_WRITE_INTERVAL_NORMAL 2000
 #define FB_WRITE_INTERVAL_FIRE 500
 #define FB_CMD_READ_INTERVAL_MS 5000
+#define FUSION_HOLD_AFTER_FLAME_CLEAR_MS 45000
 
 // ─────────────────────────────────────────────────────────────
 //  PHIÊN BẢN

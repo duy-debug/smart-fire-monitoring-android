@@ -26,28 +26,29 @@ static TiltSchedulerState tiltState = {
 
 static TaskHandle_t tiltTaskHandle = nullptr;
 static portMUX_TYPE tiltStateMux = portMUX_INITIALIZER_UNLOCKED;
-static SemaphoreHandle_t servoWriteMutex = nullptr;
+static SemaphoreHandle_t panWriteMutex = nullptr;
+static SemaphoreHandle_t tiltWriteMutex = nullptr;
 
 static void writePanServo(int angle)
 {
-    if (servoWriteMutex != nullptr)
-        xSemaphoreTake(servoWriteMutex, portMAX_DELAY);
+    if (panWriteMutex != nullptr)
+        xSemaphoreTake(panWriteMutex, portMAX_DELAY);
 
     servoPan.write(angle);
 
-    if (servoWriteMutex != nullptr)
-        xSemaphoreGive(servoWriteMutex);
+    if (panWriteMutex != nullptr)
+        xSemaphoreGive(panWriteMutex);
 }
 
 static void writeTiltServo(int angle)
 {
-    if (servoWriteMutex != nullptr)
-        xSemaphoreTake(servoWriteMutex, portMAX_DELAY);
+    if (tiltWriteMutex != nullptr)
+        xSemaphoreTake(tiltWriteMutex, portMAX_DELAY);
 
     servoTilt.write(angle);
 
-    if (servoWriteMutex != nullptr)
-        xSemaphoreGive(servoWriteMutex);
+    if (tiltWriteMutex != nullptr)
+        xSemaphoreGive(tiltWriteMutex);
 }
 
 static void tiltSchedulerTask(void *parameter)
@@ -130,8 +131,10 @@ void setupServos()
     servoPan.attach(SERVO_PAN_PIN, 500, 2400);
     servoTilt.attach(SERVO_TILT_PIN, 500, 2400);
 
-    if (servoWriteMutex == nullptr)
-        servoWriteMutex = xSemaphoreCreateMutex();
+    if (panWriteMutex == nullptr)
+        panWriteMutex = xSemaphoreCreateMutex();
+    if (tiltWriteMutex == nullptr)
+        tiltWriteMutex = xSemaphoreCreateMutex();
 
     writePanServo(90);
 
@@ -215,7 +218,6 @@ void updateServosAuto(int priorityIdx)
         return;
 
     int newPan = PAN_ANGLES[priorityIdx];
-
     if (newPan != currentPan)
     {
         currentPan = newPan;

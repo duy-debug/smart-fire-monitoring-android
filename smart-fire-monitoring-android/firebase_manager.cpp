@@ -497,6 +497,8 @@ void handleFirebaseCommands()
 
 void handleFirebaseCycle()
 {
+    const unsigned long FB_SLOW_CALL_WARN_MS = 200;
+
     if (!wifiConnected)
         return;
 
@@ -536,7 +538,21 @@ void handleFirebaseCycle()
     }
 
     // Đọc mode/ngưỡng trước để state ghi lên Firebase không bị lùi 1 nhịp
+    unsigned long t0 = millis();
     handleFirebaseCommands(); // Đồng bộ ngưỡng + mode (1s/lần)
-    writeFirebaseData();      // Batch (2s bình thường / 500ms khi cháy)
-    sendHeartbeat();          // Cập nhật last_seen (5s/lần)
+    unsigned long dt = millis() - t0;
+    if (dt >= FB_SLOW_CALL_WARN_MS)
+        Serial.printf("[Firebase][Perf] handleFirebaseCommands slow: %lu ms\n", dt);
+
+    t0 = millis();
+    writeFirebaseData(); // Batch (2s bình thường / 500ms khi cháy)
+    dt = millis() - t0;
+    if (dt >= FB_SLOW_CALL_WARN_MS)
+        Serial.printf("[Firebase][Perf] writeFirebaseData slow: %lu ms\n", dt);
+
+    t0 = millis();
+    sendHeartbeat(); // Cập nhật last_seen (5s/lần)
+    dt = millis() - t0;
+    if (dt >= FB_SLOW_CALL_WARN_MS)
+        Serial.printf("[Firebase][Perf] sendHeartbeat slow: %lu ms\n", dt);
 }

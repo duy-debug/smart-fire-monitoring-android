@@ -60,7 +60,6 @@ void setup()
 {
     // Tối ưu #5: Baud rate 115200 thay vì 9600
     Serial.begin(115200);
-    delay(500);
 
     // Tắt brownout detector — tránh reset khi servo/bơm gây sụt áp tạm thời
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
