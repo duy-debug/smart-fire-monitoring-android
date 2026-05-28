@@ -30,6 +30,8 @@ static TaskHandle_t tiltTaskHandle = nullptr;
 static portMUX_TYPE tiltStateMux = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t servoWriteMutex = nullptr;
 static int lastAutoPanIdx = -1;
+static int targetPan = 90;
+static unsigned long lastPanStep = 0;
 
 static void writePanServo(int angle)
 {
@@ -53,25 +55,52 @@ static void writeTiltServo(int angle)
         xSemaphoreGive(servoWriteMutex);
 }
 
+static void setPanImmediate(int angle)
+{
+    currentPan = constrain(angle, 0, 180);
+    targetPan = currentPan;
+    writePanServo(currentPan);
+    sensorDataDirty = true;
+}
+
+static void stepPanTowardTarget()
+{
+    if (currentPan == targetPan)
+        return;
+
+    unsigned long now = millis();
+    if (now - lastPanStep < PAN_STEP_INTERVAL_MS)
+        return;
+
+    lastPanStep = now;
+
+    int delta = targetPan - currentPan;
+    int step = constrain(delta, -PAN_STEP_DEGREES, PAN_STEP_DEGREES);
+    currentPan += step;
+    writePanServo(currentPan);
+    sensorDataDirty = true;
+}
+
 static void refreshAutoPan(int priorityIdx, bool forceWrite)
 {
+    (void)forceWrite;
+
     if (priorityIdx < 0 || priorityIdx > 4)
         return;
 
     int newPan = PAN_ANGLES[priorityIdx];
     bool directionChanged = (priorityIdx != lastAutoPanIdx);
-    bool angleChanged = (newPan != currentPan);
+    bool targetChanged = (newPan != targetPan);
 
-    if (!forceWrite && !angleChanged && !directionChanged)
+    if (!targetChanged && !directionChanged)
         return;
 
-    currentPan = newPan;
-    writePanServo(currentPan);
+    targetPan = newPan;
     lastAutoPanIdx = priorityIdx;
     sensorDataDirty = true;
 
-    if (angleChanged || directionChanged)
-        Serial.printf("[Servo AUTO] Pan=%d (eye #%d)\n", currentPan, priorityIdx + 1);
+    if (targetChanged || directionChanged)
+        Serial.printf("[Servo AUTO] Pan target=%d (eye #%d)\n", targetPan, priorityIdx + 1);
 }
 
 static void refreshAutoPanFromFlame(bool forceWrite)
@@ -138,6 +167,8 @@ static void tiltSchedulerTask(void *parameter)
         if (tiltEnabled)
             refreshAutoPanFromFlame(true);
 
+        stepPanTowardTarget();
+
         if (shouldWrite && angleToWrite != lastWrittenTilt)
         {
             writeTiltServo(angleToWrite);
@@ -175,6 +206,7 @@ void setupServos()
     writePanServo(90);
 
     currentPan = 90;
+    targetPan = 90;
     currentTilt = TILT_HOME_ANGLE;
     lastTiltStep = millis();
     tiltStep = TILT_STEP_DEGREES;
@@ -257,8 +289,7 @@ void updateServosAuto(int priorityIdx)
 void updateServosManual(int pan, int tilt)
 {
     lastAutoPanIdx = -1;
-    currentPan = constrain(pan, 0, 180);
-    writePanServo(currentPan);
+    setPanImmediate(pan);
     setTiltManualPosition(tilt);
     Serial.printf("[Servo MANUAL] Pan=%d | Tilt=%d\n", currentPan, currentTilt);
 }

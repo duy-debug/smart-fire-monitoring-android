@@ -78,6 +78,9 @@ inline const char *DHT_STATUS_STR[] = {"ok", "error"};
 // ─────────────────────────────────────────────────────────────
 const int PAN_ANGLES[5] = {50, 70, 90, 120, 140};
 
+#define PAN_STEP_DEGREES 2
+#define PAN_STEP_INTERVAL_MS 12
+
 #define TILT_HOME_ANGLE 45
 #define TILT_MIN 30
 #define TILT_MAX 150
