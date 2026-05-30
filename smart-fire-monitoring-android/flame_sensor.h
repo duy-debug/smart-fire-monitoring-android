@@ -7,6 +7,8 @@
 
 void setupFlamePins();
 void readFlameSensors();
+int pollFlameSensorsImmediate(bool logChanges = false);
+int getActiveFlamePriorityIdx();
 void checkSensorFusion();
 
 #endif // FLAME_SENSOR_H

@@ -10,21 +10,60 @@
 #include "servo_control.h"
 #include "firebase_manager.h"
 
-static bool anyFlameEyeActive()
+static unsigned long flameClearedFusionHoldStart = 0;
+static bool suppressFusionAfterFlameClear = false;
+
+static void clearFireStateImmediate()
 {
-    for (int i = 0; i < 5; i++)
+    // 1) Turn off alert logic immediately.
+    setBuzzer(false);
+    setPump(false);
+    flameClearedFusionHoldStart = 0;
+    fireDetected = false;
+    waitingForServo = false;
+    sensorDataDirty = true;
+    Serial.println("[AUTO] Alert logic cleared immediately (buzzer/pump OFF).");
+
+    // 2) Push reset state to Firebase immediately.
+    if (isFirebaseReady())
     {
-        if (flameDetected[i])
-            return true;
+        esp_task_wdt_reset();
+        FirebaseJson resetJson;
+        resetJson.set("system/fire_detected", false);
+        resetJson.set("actuators/pump", false);
+        resetJson.set("actuators/buzzer", false);
+        resetJson.set("actuators/auto_pump_active", false);
+        Firebase.RTDB.updateNode(&fbData, FB_ROOT, &resetJson);
     }
 
-    return false;
+    // 3) Return servos home asynchronously.
+    stopTiltSweep(TILT_HOME_ANGLE);
+    updateServosManual(90, TILT_HOME_ANGLE);
+
+    resolveLogEvent();
 }
 
 void handleAutoMode()
 {
-    bool flameEyeActive = anyFlameEyeActive();
-    bool shouldActivate = anyFlameDetected || sensorFusionAlert;
+    // Nếu đang chữa cháy và mắt lửa đã hết thì reset ngay,
+    // tránh giữ còi/pump do độ trễ cập nhật của cảm biến fusion.
+    if (fireDetected && !anyFlameDetected)
+    {
+        suppressFusionAfterFlameClear = sensorFusionAlert;
+        flameClearedFusionHoldStart = 0;
+        Serial.println("[AUTO] Flame cleared. Full reset immediately.");
+        clearFireStateImmediate();
+        return;
+    }
+
+    if (anyFlameDetected || !sensorFusionAlert)
+    {
+        suppressFusionAfterFlameClear = false;
+        flameClearedFusionHoldStart = 0;
+    }
+
+    bool shouldActivate = anyFlameDetected ||
+                          (sensorFusionAlert && !suppressFusionAfterFlameClear);
 
     if (!alertEnabled || alertSnoozed)
     {
@@ -50,7 +89,7 @@ void handleAutoMode()
             if (anyFlameDetected && flamePriorityIdx >= 0)
                 updateServosAuto(flamePriorityIdx);
             else
-                updateServosManual(90, 90);
+                updateServosManual(90, TILT_HOME_ANGLE);
 
             if (isFirebaseReady())
             {
@@ -78,52 +117,19 @@ void handleAutoMode()
                 Firebase.RTDB.setBool(&fbData, FB_ROOT "/actuators/auto_pump_active", true);
             }
         }
-        else if (waitingForServo && !flameEyeActive)
-        {
-            stopTiltSweep(90);
-        }
 
-        if (!waitingForServo)
+        if (anyFlameDetected && flamePriorityIdx >= 0)
         {
-            if (flameEyeActive && anyFlameDetected && flamePriorityIdx >= 0)
-            {
-                updateServosAuto(flamePriorityIdx);
-            }
-            else
-            {
-                stopTiltSweep(90);
-            }
+            updateServosAuto(flamePriorityIdx);
+        }
+        else
+        {
+            stopTiltSweep(TILT_HOME_ANGLE);
         }
     }
-    else
+    else if (fireDetected)
     {
-        if (fireDetected)
-        {
-            fireDetected = false;
-            waitingForServo = false;
-            sensorDataDirty = true;
-
-            Serial.println("[AUTO] Fire cleared. Resetting system.");
-
-            setPump(false);
-            delay(200);
-            setBuzzer(false);
-            delay(200);
-            updateServosManual(90, 90);
-            resolveLogEvent();
-
-            if (isFirebaseReady())
-            {
-                esp_task_wdt_reset();
-                FirebaseJson resetJson;
-                resetJson.set("system/fire_detected", false);
-                resetJson.set("actuators/pump", false);
-                resetJson.set("actuators/buzzer", false);
-                resetJson.set("actuators/auto_pump_active", false);
-                resetJson.set("actuators/servo/axis_x", 90);
-                resetJson.set("actuators/servo/axis_y", 90);
-                Firebase.RTDB.updateNode(&fbData, FB_ROOT, &resetJson);
-            }
-        }
+        Serial.println("[AUTO] Fire cleared. Resetting system immediately.");
+        clearFireStateImmediate();
     }
 }

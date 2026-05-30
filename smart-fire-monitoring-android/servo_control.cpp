@@ -4,6 +4,8 @@
 
 #include <Arduino.h>
 
+#include "flame_sensor.h"
+
 struct TiltSchedulerState
 {
     bool enabled;
@@ -19,7 +21,7 @@ static TiltSchedulerState tiltState = {
     false,
     TILT_SWEEP_MIN,
     TILT_SWEEP_MAX,
-    TILT_SWEEP_MIN,
+    TILT_HOME_ANGLE,
     TILT_STEP_DEGREES,
     0,
     true};
@@ -27,6 +29,9 @@ static TiltSchedulerState tiltState = {
 static TaskHandle_t tiltTaskHandle = nullptr;
 static portMUX_TYPE tiltStateMux = portMUX_INITIALIZER_UNLOCKED;
 static SemaphoreHandle_t servoWriteMutex = nullptr;
+static int lastAutoPanIdx = -1;
+static int targetPan = 90;
+static unsigned long lastPanStep = 0;
 
 static void writePanServo(int angle)
 {
@@ -50,6 +55,62 @@ static void writeTiltServo(int angle)
         xSemaphoreGive(servoWriteMutex);
 }
 
+static void setPanImmediate(int angle)
+{
+    currentPan = constrain(angle, 0, 180);
+    targetPan = currentPan;
+    writePanServo(currentPan);
+    sensorDataDirty = true;
+}
+
+static void stepPanTowardTarget()
+{
+    if (currentPan == targetPan)
+        return;
+
+    unsigned long now = millis();
+    if (now - lastPanStep < PAN_STEP_INTERVAL_MS)
+        return;
+
+    lastPanStep = now;
+
+    int delta = targetPan - currentPan;
+    int step = constrain(delta, -PAN_STEP_DEGREES, PAN_STEP_DEGREES);
+    currentPan += step;
+    writePanServo(currentPan);
+    sensorDataDirty = true;
+}
+
+static void refreshAutoPan(int priorityIdx, bool forceWrite)
+{
+    (void)forceWrite;
+
+    if (priorityIdx < 0 || priorityIdx > 4)
+        return;
+
+    int newPan = PAN_ANGLES[priorityIdx];
+    bool directionChanged = (priorityIdx != lastAutoPanIdx);
+    bool targetChanged = (newPan != targetPan);
+
+    if (!targetChanged && !directionChanged)
+        return;
+
+    targetPan = newPan;
+    lastAutoPanIdx = priorityIdx;
+    sensorDataDirty = true;
+
+    if (targetChanged || directionChanged)
+        Serial.printf("[Servo AUTO] Pan target=%d (eye #%d)\n", targetPan, priorityIdx + 1);
+}
+
+static void refreshAutoPanFromFlame(bool forceWrite)
+{
+    int priorityIdx = pollFlameSensorsImmediate(false);
+
+    if (priorityIdx >= 0)
+        refreshAutoPan(priorityIdx, forceWrite);
+}
+
 static void tiltSchedulerTask(void *parameter)
 {
     (void)parameter;
@@ -63,9 +124,11 @@ static void tiltSchedulerTask(void *parameter)
     {
         int angleToWrite = lastWrittenTilt;
         bool shouldWrite = false;
+        bool tiltEnabled = false;
         unsigned long now = millis();
 
         portENTER_CRITICAL(&tiltStateMux);
+        tiltEnabled = tiltState.enabled;
 
         if (tiltState.enabled && now - tiltState.lastStep >= TILT_STEP_INTERVAL_MS)
         {
@@ -101,10 +164,17 @@ static void tiltSchedulerTask(void *parameter)
 
         portEXIT_CRITICAL(&tiltStateMux);
 
+        if (tiltEnabled)
+            refreshAutoPanFromFlame(true);
+
+        stepPanTowardTarget();
+
         if (shouldWrite && angleToWrite != lastWrittenTilt)
         {
             writeTiltServo(angleToWrite);
             lastWrittenTilt = angleToWrite;
+
+            refreshAutoPanFromFlame(true);
         }
 
         vTaskDelay(delayTicks);
@@ -136,7 +206,8 @@ void setupServos()
     writePanServo(90);
 
     currentPan = 90;
-    currentTilt = TILT_SWEEP_MIN;
+    targetPan = 90;
+    currentTilt = TILT_HOME_ANGLE;
     lastTiltStep = millis();
     tiltStep = TILT_STEP_DEGREES;
 
@@ -144,7 +215,7 @@ void setupServos()
     tiltState.enabled = false;
     tiltState.minAngle = TILT_SWEEP_MIN;
     tiltState.maxAngle = TILT_SWEEP_MAX;
-    tiltState.currentTilt = TILT_SWEEP_MIN;
+    tiltState.currentTilt = TILT_HOME_ANGLE;
     tiltState.direction = TILT_STEP_DEGREES;
     tiltState.lastStep = lastTiltStep;
     tiltState.writePending = true;
@@ -162,7 +233,7 @@ void setupServos()
             1);
     }
 
-    Serial.println("[Servo] Started. Pan=90, Tilt=30, tilt scheduler active.");
+    Serial.printf("[Servo] Started. Pan=90, Tilt=%d, tilt scheduler active.\n", TILT_HOME_ANGLE);
 }
 
 int calcTiltAngle(int adcValue)
@@ -178,7 +249,7 @@ void sweepTilt()
 
 void resetTiltSweep()
 {
-    stopTiltSweep(90);
+    stopTiltSweep(TILT_HOME_ANGLE);
 }
 
 void startTiltSweep()
@@ -211,25 +282,14 @@ void stopTiltSweep(int resetAngle)
 
 void updateServosAuto(int priorityIdx)
 {
-    if (priorityIdx < 0 || priorityIdx > 4)
-        return;
-
-    int newPan = PAN_ANGLES[priorityIdx];
-
-    if (newPan != currentPan)
-    {
-        currentPan = newPan;
-        writePanServo(currentPan);
-        Serial.printf("[Servo AUTO] Pan=%d (eye #%d)\n", currentPan, priorityIdx + 1);
-    }
-
+    refreshAutoPan(priorityIdx, true);
     startTiltSweep();
 }
 
 void updateServosManual(int pan, int tilt)
 {
-    currentPan = constrain(pan, 0, 180);
-    writePanServo(currentPan);
+    lastAutoPanIdx = -1;
+    setPanImmediate(pan);
     setTiltManualPosition(tilt);
     Serial.printf("[Servo MANUAL] Pan=%d | Tilt=%d\n", currentPan, currentTilt);
 }
