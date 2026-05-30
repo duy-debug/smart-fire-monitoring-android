@@ -28,7 +28,6 @@ Project gồm 2 phần chính:
     <td align="center"><img src="image/history-list.png" alt="History List" width="190"></td>
     <td align="center"><img src="image/history-chart.png" alt="History Chart" width="190"></td>
     <td align="center"><img src="image/nguong.png" alt="Ngưỡng" width="190"></td>
-
   </tr>
 </table>
 
@@ -37,7 +36,20 @@ Project gồm 2 phần chính:
 <table>
   <tr>
     <td align="center"><img src="image/warning.png" alt="Warning 1" width="190"></td>
-        <td align="center"><img src="image/notify.png" alt="Thông báo" width="190"></td>
+    <td align="center"><img src="image/notify.png" alt="Thông báo" width="190"></td>
+  </tr>
+</table>
+
+### Mô Hình Hệ Thống Sau Khi Lắp Ráp
+
+<table>
+  <tr>
+    <td align="center"><img src="image/demo1.png" alt="Demo 1" width="260"></td>
+    <td align="center"><img src="image/demo2.png" alt="Demo 2" width="260"></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="image/demo3.png" alt="Demo 3" width="260"></td>
+    <td align="center"><img src="image/demo4.png" alt="Demo 4" width="260"></td>
   </tr>
 </table>
 
@@ -131,4 +143,3 @@ fire-alarm-system/
 
 - ESP32 Firmware: hoàn thành
 - Android App: đang hoàn thiện và tối ưu UI/UX
-
