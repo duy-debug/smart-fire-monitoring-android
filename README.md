@@ -7,6 +7,12 @@ Hệ thống giám sát và cảnh báo cháy theo thời gian thực, kết h�
 - **ESP32 Firmware**: đọc cảm biến, phát hiện cháy, điều khiển servo, bơm, còi và đồng bộ dữ liệu lên Firebase.
 - **Android App**: hiển thị realtime, điều khiển từ xa, theo dõi lịch sử và cảnh báo cháy.
 
+## Video demo
+
+<div align="center">
+  <p><a href="video/DemoProjectMobile.mp4">Xem video demo</a></p>
+</div>
+
 ## Ảnh giao diện
 
 ### Màn hình chính
@@ -143,4 +149,3 @@ fire-alarm-system/
 
 - ESP32 Firmware: hoàn thành
 - Android App: đang hoàn thiện và tối ưu UI/UX
-
