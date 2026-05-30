@@ -133,6 +133,37 @@ fire-alarm-system/
    - Firebase Auth
 3. Upload code lên board ESP32.
 
+## Tải APK
+
+Người dùng có thể tải và cài trực tiếp file APK đã build từ GitHub Releases:
+
+- [Tải APK release](https://github.com/duy-debug/smart-fire-monitoring-android/releases/latest/download/smart-fire-monitoring-android.apk)
+
+### Cách build APK để phát hành
+
+1. Mở project bằng Android Studio.
+2. Chọn `Build` -> `Generate Signed App Bundle or APK...`.
+3. Chọn `APK`.
+4. Tạo hoặc chọn `keystore` để ký ứng dụng.
+5. Chọn biến thể `release` và bấm `Finish`.
+6. Sau khi build xong, file APK sẽ nằm trong:
+   - `SmartFireMonitoring/app/build/outputs/apk/release/`
+
+### Cài đặt trên điện thoại Android
+
+1. Mở link tải APK trên điện thoại.
+2. Tải file `smart-fire-monitoring-android.apk` về máy.
+3. Nếu điện thoại chặn cài ứng dụng ngoài Google Play, vào `Cài đặt` và bật quyền `Cài đặt ứng dụng không rõ nguồn gốc` cho trình duyệt hoặc trình quản lý file.
+4. Mở file APK vừa tải xuống.
+5. Chọn `Cài đặt`.
+6. Sau khi cài xong, mở ứng dụng `Smart Fire Monitoring` từ màn hình chính.
+
+### Ghi chú khi chia sẻ cho người dùng
+
+- File APK release được workflow GitHub Actions tự tạo và đính kèm vào `Releases`.
+- Khi tạo tag version như `v1.0.0`, workflow sẽ build và upload file `smart-fire-monitoring-android.apk`.
+- Nếu chỉ dùng để test nhanh nội bộ, bản `debug` vẫn có thể build từ Android Studio.
+
 ## Ghi Chú
 
 - App hoạt động theo realtime Firebase RTDB.
@@ -143,3 +174,4 @@ fire-alarm-system/
 
 - ESP32 Firmware: hoàn thành
 - Android App: đang hoàn thiện và tối ưu UI/UX
+
