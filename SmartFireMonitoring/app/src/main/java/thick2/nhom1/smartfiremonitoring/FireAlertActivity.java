@@ -15,6 +15,7 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.appcompat.app.AppCompatActivity;
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.content.ContextCompat;
 
 public class FireAlertActivity extends AppCompatActivity {
@@ -41,6 +42,7 @@ public class FireAlertActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_fire_alert);
 
+        // Cấu hình cửa sổ hiển thị dạng phủ mờ toàn màn hình để tạo cảm giác cảnh báo khẩn cấp.
         if (getWindow() != null) {
             getWindow().setBackgroundDrawableResource(android.R.color.transparent);
             getWindow().setDimAmount(0.70f);
@@ -52,22 +54,27 @@ public class FireAlertActivity extends AppCompatActivity {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O_MR1) {
+            // Cho phép màn hình cảnh báo xuất hiện ngay cả khi điện thoại đang khóa.
             setShowWhenLocked(true);
             setTurnScreenOn(true);
         }
 
+        // Lấy các view chính của dialog cảnh báo.
         pulseCircle = findViewById(R.id.fireAlertPulseCircle);
         pulseCircleDrawable = (GradientDrawable) pulseCircle.getBackground().mutate();
         titleText = findViewById(R.id.tvFireAlertTitle);
         TextView tvTime = findViewById(R.id.tvFireAlertTimeValue);
         TextView btnClose = findViewById(R.id.btnFireAlertClose);
 
+        // Hiển thị thời điểm phát hiện cảnh báo để người dùng biết sự cố xảy ra lúc nào.
         tvTime.setText("Phát hiện lúc: " + formatNow());
         btnClose.setOnClickListener(v -> dismissByUser());
 
+        // Phát âm thanh báo động và chạy hiệu ứng nhấp nháy để làm nổi bật trạng thái nguy hiểm.
         startAlarmSound();
         startFlashAnimation();
         registerCloseReceiver();
+        registerBackPressedHandler();
     }
 
     private void startAlarmSound() {
@@ -100,6 +107,7 @@ public class FireAlertActivity extends AppCompatActivity {
     private void startFlashAnimation() {
         stopFlashAnimation();
 
+        // Hiệu ứng đổi màu giữa đỏ và trắng giúp người dùng nhận ra cảnh báo ngay lập tức.
         flashAnimator = ValueAnimator.ofFloat(0f, 1f);
         flashAnimator.setDuration(650L);
         flashAnimator.setRepeatCount(ValueAnimator.INFINITE);
@@ -126,6 +134,7 @@ public class FireAlertActivity extends AppCompatActivity {
     }
 
     private void dismissByUser() {
+        // Gửi tín hiệu về service để biết người dùng đã tự đóng dialog.
         sendBroadcast(new Intent(ACTION_USER_DISMISS));
         finish();
     }
@@ -139,12 +148,23 @@ public class FireAlertActivity extends AppCompatActivity {
         closeReceiver = new BroadcastReceiver() {
             @Override
             public void onReceive(Context context, Intent intent) {
+                // Service sẽ gửi broadcast này khi cần đóng màn hình cảnh báo tự động.
                 finish();
             }
         };
 
         IntentFilter filter = new IntentFilter(ACTION_CLOSE);
         ContextCompat.registerReceiver(this, closeReceiver, filter, ContextCompat.RECEIVER_NOT_EXPORTED);
+    }
+
+    private void registerBackPressedHandler() {
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                // Giữ hành vi nút Back giống nút X: báo về service rồi đóng dialog.
+                dismissByUser();
+            }
+        });
     }
 
     @Override
@@ -159,10 +179,5 @@ public class FireAlertActivity extends AppCompatActivity {
             }
             closeReceiver = null;
         }
-    }
-
-    @Override
-    public void onBackPressed() {
-        dismissByUser();
     }
 }

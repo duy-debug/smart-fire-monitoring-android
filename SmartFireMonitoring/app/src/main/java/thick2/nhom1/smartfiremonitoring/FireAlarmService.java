@@ -78,11 +78,17 @@ public class FireAlarmService extends Service {
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "Service created");
+
+        // Khởi tạo sẵn các kênh thông báo để Android 8+ có thể hiển thị cảnh báo đúng cách.
         ensureNotificationChannels();
+        // Đưa service lên foreground để hệ thống ưu tiên giữ tiến trình này hoạt động lâu dài.
         startForegroundServiceNotification();
 
+        // Tham chiếu tới node gốc trên Firebase, nơi ESP32 đẩy toàn bộ dữ liệu realtime.
         rootRef = FirebaseDatabase.getInstance().getReference("fire-alarm-system");
+        // Chỉ bắt đầu lắng nghe dữ liệu khi FirebaseAuth đã có người dùng hợp lệ.
         setupAuthListener();
+        // Đăng ký receiver để nhận lệnh đóng dialog từ FireAlertActivity.
         registerOverlayDismissReceiver();
     }
 
@@ -117,10 +123,12 @@ public class FireAlarmService extends Service {
         authStateListener = firebaseAuth -> {
             if (firebaseAuth.getCurrentUser() != null) {
                 if (!isListening) {
+                    // Khi đã đăng nhập thành công, bắt đầu lắng nghe trạng thái cháy theo thời gian thực.
                     listenForFire();
                     isListening = true;
                 }
             } else if (isListening && rootRef != null && fireListener != null) {
+                // Nếu mất đăng nhập thì gỡ listener để tránh nhận dữ liệu khi phiên xác thực không còn hợp lệ.
                 rootRef.removeEventListener(fireListener);
                 isListening = false;
             }
@@ -136,9 +144,11 @@ public class FireAlarmService extends Service {
                     return;
                 }
 
+                // Đọc trạng thái cháy hiện tại từ Firebase.
                 Boolean fire = snapshot.child("system/fire_detected").getValue(Boolean.class);
                 isFireDetected = fire != null && fire;
 
+                // Cập nhật các dữ liệu cảm biến để dùng cho notification và màn hình cảnh báo.
                 String direction = snapshot.child("sensors/flame/direction").getValue(String.class);
                 Double temp = snapshot.child("sensors/dht11/temperature").getValue(Double.class);
                 Integer mq2Value = snapshot.child("sensors/mq2/value").getValue(Integer.class);
@@ -161,6 +171,9 @@ public class FireAlarmService extends Service {
 
                 boolean appInForeground = isAppInForeground();
                 if (isFireDetected && currentAlertEnabled && !currentSnoozedActive) {
+                    // Có cháy và cảnh báo đang bật:
+                    // - nếu app đang mở thì hiện dialog toàn màn hình
+                    // - đồng thời gửi notification để người dùng vẫn nhận biết được cảnh báo
                     cancelOverlayClose();
                     cancelOverlayReopen();
 
@@ -178,6 +191,8 @@ public class FireAlarmService extends Service {
 
                     startRepeatingNotification(appInForeground);
                 } else if (isFireDetected) {
+                    // Có cháy nhưng người dùng đã tắt cảnh báo hoặc đang snooze:
+                    // tạm ngưng notification và dialog theo đúng trạng thái cấu hình.
                     cancelOverlayClose();
                     cancelOverlayReopen();
                     fireAlertShown = false;
@@ -185,6 +200,8 @@ public class FireAlarmService extends Service {
                     stopRepeatingNotification();
                     cancelFireNotification();
                 } else {
+                    // Khi hết cháy, dừng toàn bộ cảnh báo và chờ một khoảng ngắn trước khi đóng dialog
+                    // để tránh việc Firebase cập nhật chậm khiến giao diện nhấp nháy.
                     cancelOverlayReopen();
                     stopRepeatingNotification();
                     cancelFireNotification();
@@ -219,6 +236,7 @@ public class FireAlarmService extends Service {
                     return;
                 }
 
+                // Nội dung notification được tạo trực tiếp từ dữ liệu realtime hiện tại.
                 String tempStr = (currentTemp > 0) ? String.valueOf(currentTemp) : "--";
                 String body = "Phát hiện cháy hướng " + currentDirection + ". Nhiệt độ: " + tempStr + "°C";
                 sendNotification("CẢNH BÁO CHÁY KHẨN CẤP!", body, allowFullScreen);
@@ -254,6 +272,7 @@ public class FireAlarmService extends Service {
             return;
         }
 
+        // Mở FireAlertActivity và truyền dữ liệu cảm biến để dialog hiển thị đúng thông tin cảnh báo.
         mainHandler.post(() -> {
             Intent intent = new Intent(this, FireAlertActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
@@ -279,6 +298,7 @@ public class FireAlarmService extends Service {
                     return;
                 }
 
+                // Nếu người dùng tự đóng dialog khi đám cháy vẫn còn, cho phép mở lại sau một khoảng trễ ngắn.
                 if (isFireDetected && currentAlertEnabled && !currentSnoozedActive) {
                     fireAlertShown = false;
                     scheduleOverlayReopen();
@@ -295,6 +315,7 @@ public class FireAlarmService extends Service {
             return;
         }
 
+        // Khi hết cháy, đợi 5 giây rồi mới đóng dialog để tránh đóng/mở liên tục nếu dữ liệu cập nhật chậm.
         overlayCloseScheduled = true;
         overlayCloseRunnable = () -> {
             overlayCloseScheduled = false;
@@ -319,6 +340,7 @@ public class FireAlarmService extends Service {
             return;
         }
 
+        // Nếu người dùng vừa tắt dialog trong lúc cháy còn tồn tại, tự mở lại sau một khoảng trễ ngắn.
         overlayReopenScheduled = true;
         overlayReopenRunnable = () -> {
             overlayReopenScheduled = false;
@@ -361,6 +383,7 @@ public class FireAlarmService extends Service {
         String channelId = allowFullScreen ? FIRE_CHANNEL_SILENT_ID : FIRE_CHANNEL_SOUND_ID;
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Từ Android 8 trở lên, notification bắt buộc phải đi qua notification channel.
             AudioAttributes audioAttributes = new AudioAttributes.Builder()
                     .setUsage(AudioAttributes.USAGE_ALARM)
                     .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
@@ -407,6 +430,7 @@ public class FireAlarmService extends Service {
         }
 
         if (allowFullScreen) {
+            // Khi ứng dụng đang mở, notification có thể mở thẳng sang màn hình cảnh báo toàn màn hình.
             Intent alertIntent = new Intent(this, FireAlertActivity.class);
             alertIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK
                     | Intent.FLAG_ACTIVITY_CLEAR_TOP
@@ -430,6 +454,7 @@ public class FireAlarmService extends Service {
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            // Notification foreground giúp service luôn được hệ thống nhận diện là tiến trình đang hoạt động.
             NotificationChannel channel = new NotificationChannel(
                     FOREGROUND_CHANNEL_ID,
                     "Giám sát hệ thống cháy",
@@ -477,6 +502,7 @@ public class FireAlarmService extends Service {
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build();
 
+        // Channel có âm thanh dùng khi ứng dụng đang chạy nền hoặc màn hình đã tắt.
         NotificationChannel soundChannel = new NotificationChannel(
                 FIRE_CHANNEL_SOUND_ID,
                 "Cảnh báo cháy",
@@ -490,6 +516,7 @@ public class FireAlarmService extends Service {
         soundChannel.setSound(fireSoundUri, audioAttributes);
         notificationManager.createNotificationChannel(soundChannel);
 
+        // Channel im lặng dùng khi ứng dụng đang mở và dialog cảnh báo đã được hiển thị.
         NotificationChannel silentChannel = new NotificationChannel(
                 FIRE_CHANNEL_SILENT_ID,
                 "Cảnh báo cháy (im lặng)",
@@ -532,6 +559,7 @@ public class FireAlarmService extends Service {
             if (processInfo != null
                     && packageName.equals(processInfo.processName)
                     && processInfo.importance == ActivityManager.RunningAppProcessInfo.IMPORTANCE_FOREGROUND) {
+                // Tiến trình có mức ưu tiên foreground nghĩa là app đang được người dùng nhìn thấy trực tiếp.
                 return true;
             }
         }
